@@ -1,0 +1,7 @@
+ktor:
+  wait: true
+
+mysql:
+  host: 'localhost'
+  user: 'root'
+  password: ''
