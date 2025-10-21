@@ -15,6 +15,10 @@ import com.fasterxml.jackson.databind.SerializerProvider
 import com.fasterxml.jackson.databind.module.SimpleModule
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import dev.agner.template.usecase.configuration.serializers.CronExpressionModule
+import dev.agner.template.usecase.configuration.serializers.KotlinxDatePeriodModule
+import dev.agner.template.usecase.configuration.serializers.KotlinxLocalDateModule
+import dev.agner.template.usecase.configuration.serializers.KotlinxLocalDateTimeModule
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import org.springframework.context.annotation.Bean
@@ -23,10 +27,13 @@ import org.springframework.stereotype.Component
 @Component
 object JsonMapper {
 
-    val mapper: ObjectMapper = ObjectMapper()
+    private val mapper: ObjectMapper = ObjectMapper()
         .registerKotlinModule()
         .registerModule(JavaTimeModule())
-        .registerModule(kotlinxDatetimeModule)
+        .registerModule(KotlinxLocalDateTimeModule())
+        .registerModule(KotlinxLocalDateModule())
+        .registerModule(KotlinxDatePeriodModule())
+        .registerModule(CronExpressionModule())
         .setDefaultPropertyInclusion(JsonInclude.Include.NON_NULL)
         .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
