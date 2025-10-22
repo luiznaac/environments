@@ -9,7 +9,6 @@ application {
         "-XX:+UseNUMA",
         "-XX:+UseG1GC",
         "-XX:+UseStringDeduplication",
-        "-Duser.timezone=Etc/UTC",
     )
 }
 
