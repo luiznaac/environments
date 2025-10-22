@@ -22,6 +22,7 @@ class KtorConfig(
     private val routes: Set<ControllerTemplate>,
     private val mapper: ObjectMapper,
     @Value("\${ktor.wait}") wait: Boolean,
+    @Value("\${ktor.port}") port: Int,
 ) {
 
     private val server: EmbeddedServer<*, *>
@@ -29,7 +30,7 @@ class KtorConfig(
     init {
         val log = logger()
 
-        server = embeddedServer(Netty, port = 8080) {
+        server = embeddedServer(Netty, port = port) {
             routes.onEach {
                 log.info("Initializing route: ${it::class.java.simpleName}")
                 routing(it.routes())

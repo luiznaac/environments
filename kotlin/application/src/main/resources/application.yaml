@@ -1,7 +1,8 @@
 ktor:
+  port: 8080
   wait: true
 
 mysql:
-  host: 'localhost'
-  user: 'root'
-  password: ''
+  host: ${MYSQL_HOST}
+  user: ${MYSQL_USER}
+  password: ${MYSQL_PASSWORD}
