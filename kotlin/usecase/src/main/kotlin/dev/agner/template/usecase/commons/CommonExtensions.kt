@@ -8,9 +8,9 @@ import kotlinx.datetime.DayOfWeek.SATURDAY
 import kotlinx.datetime.DayOfWeek.SUNDAY
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
-import kotlinx.datetime.TimeZone
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
+import kotlinx.datetime.toKotlinTimeZone
 import kotlinx.datetime.toLocalDateTime
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -62,7 +62,8 @@ inline fun <reified R> Iterable<*>.firstOfInstance(): R {
 }
 
 @OptIn(ExperimentalTime::class)
-fun LocalDateTime.Companion.now(clock: Clock) = clock.instant().toKotlinInstant().toLocalDateTime(TimeZone.UTC)
+fun LocalDateTime.Companion.now(clock: Clock) =
+    clock.instant().toKotlinInstant().toLocalDateTime(clock.zone.toKotlinTimeZone())
 
 fun LocalDate.Companion.today(clock: Clock) = LocalDateTime.now(clock).date
 

@@ -8,5 +8,5 @@ import java.time.Clock
 class TimeProviderConfig {
 
     @Bean
-    fun timeProvider(): Clock = Clock.systemUTC()
+    fun timeProvider(): Clock = Clock.systemDefaultZone()
 }

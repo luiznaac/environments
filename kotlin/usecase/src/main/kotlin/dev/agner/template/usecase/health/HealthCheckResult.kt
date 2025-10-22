@@ -1,9 +1,9 @@
 package dev.agner.template.usecase.health
 
-import java.time.Instant
+import kotlinx.datetime.LocalDateTime
 
 data class HealthCheckResult(
     val serviceName: String,
     val isHealthy: Boolean,
-    val timestamp: Instant = Instant.now(),
+    val timestamp: LocalDateTime,
 )
