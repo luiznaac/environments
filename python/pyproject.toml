@@ -1,0 +1,141 @@
+[project]
+name = "template"
+version = "1.0.0"
+description = "Backend service scaffold — the Ktor-family hexagonal architecture ported to Python"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.118",
+    "uvicorn[standard]>=0.37",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.7",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncmy>=0.2.10",
+    "httpx>=0.28",
+    "anyio>=4.7",
+    "structlog>=24.4",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "import-linter>=2.1",
+    "poethepoet>=0.31",
+    "pre-commit>=4.0",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "pytest-mock>=3.14",
+    "pytest-httpserver>=1.1",
+    "testcontainers[mysql]>=4.9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/template"]
+
+# ---------------------------------------------------------------------------
+# Task runner — the equivalent of the Gradle tasks. Run with `uv run poe <task>`.
+# ---------------------------------------------------------------------------
+[tool.poe.tasks]
+lint = "ruff check ."
+format = "ruff format ."
+"format-check" = "ruff format --check ."
+typecheck = "mypy"
+contracts = "lint-imports"
+test = "pytest"
+"test-unit" = "pytest tests/unit"
+"test-integration" = "pytest tests/integration"
+# `check` mirrors the Kotlin `test` task: it does NOT run the Docker-backed
+# integration suite. CI runs `test` (full) because the runner has a daemon.
+check = ["lint", "format-check", "typecheck", "contracts", "test-unit"]
+run = "uvicorn template.application.boot:app --reload --port 8080"
+
+# ---------------------------------------------------------------------------
+# Lint / format — Ruff replaces Detekt + detekt-formatting.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",      # pycodestyle / pyflakes
+    "I",                 # import sorting (isort)
+    "N",                 # pep8-naming
+    "UP",                # pyupgrade
+    "B",                 # bugbear
+    "A",                 # builtin shadowing
+    "C4",                # comprehensions
+    "SIM",               # simplify
+    "PTH",               # use pathlib
+    "ASYNC",             # async gotchas
+    "RUF",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+"src/template/usecase/commons/logging.py" = ["A005"]
+
+# ---------------------------------------------------------------------------
+# Types — `allWarningsAsErrors` equivalent.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["template"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["testcontainers.*", "pytest_httpserver.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = ["integration: needs a Docker daemon (spins up MySQL via testcontainers)"]
+
+[tool.coverage.run]
+source = ["src/template"]
+branch = true
+
+[tool.coverage.report]
+omit = [
+    "src/template/application/boot.py",
+    "src/template/application/container.py",
+    "*/configuration/*",
+]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "\\.\\.\\.", "raise NotImplementedError"]
+
+# ---------------------------------------------------------------------------
+# Architecture enforcement — the "modules only point inward" rule the Gradle
+# module graph gives us for free. `uv run lint-imports`.
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "template"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Hexagonal layers (dependencies point inward)"
+type = "layers"
+containers = ["template"]
+layers = [
+    "application",
+    "(httpapi) (persistence) (gateway)",
+    "usecase",
+]
+
+[[tool.importlinter.contracts]]
+name = "usecase is a pure core (no framework leakage)"
+type = "forbidden"
+source_modules = ["template.usecase"]
+forbidden_modules = ["fastapi", "sqlalchemy", "httpx", "uvicorn", "pydantic"]
