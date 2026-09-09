@@ -91,7 +91,12 @@ package layout. Integration tests in `integrationTest/` boot the full stack via 
 ./gradlew testCoverageReport   # aggregated JaCoCo report
 ```
 
-## Renaming when starting a new project
+## Git workflow
+
+**Do not commit directly to `master`.** Always create a feature branch and open a PR,
+even for a small or "obviously safe" change. This applies to all contributors.
+
+Renaming when starting a new project:
 
 `dev.agner.template` → `dev.agner.<project>` in:
 - `build.gradle.kts` (rootProject.name, package declarations)

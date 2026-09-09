@@ -124,6 +124,11 @@ nor mypy cover them — Ruff still does (`ruff check .` lints everything).
 `--strict`, import-linter, pytest. CI (`.github/workflows/ci.yml`) runs the same. Unit tests must
 not need Docker; integration tests spin up MySQL via Testcontainers and are marked `integration`.
 
+## Git workflow
+
+**Do not commit directly to `master`.** Always create a feature branch and open a PR,
+even for a small or "obviously safe" change. This applies to all contributors.
+
 ## Renaming when starting a new project
 
 `template` -> `<project>` in: `src/template/` dir, `pyproject.toml` (`name`, hatch `packages`,
