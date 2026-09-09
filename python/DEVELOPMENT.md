@@ -118,11 +118,43 @@ nor mypy cover them — Ruff still does (`ruff check .` lints everything).
 - Logs via `get_logger(__name__)`; event-style keys (`_log.info("widgets.listed", count=n)`).
 - Config via `Settings`; nested env vars use `__` (`MYSQL__HOST`).
 
+## Testing
+
+Kotest (`pytest`), fixtures in `tests/fixtures.py`. Tests live in `tests/unit/` (no Docker) and
+`tests/integration/` (spins MySQL via Testcontainers).
+
+```bash
+uv run poe test              # unit tests only
+uv run poe test:integration  # integration tests
+```
+
 ## Code style / checks
 
 `uv run poe check` must pass before a change is done. Ruff (lint + format, 120 cols), mypy
 `--strict`, import-linter, pytest. CI (`.github/workflows/ci.yml`) runs the same. Unit tests must
 not need Docker; integration tests spin up MySQL via Testcontainers and are marked `integration`.
+
+## Configuration
+
+`src/template/application/settings.py` (pydantic-settings, `APP_ENV` profile):
+
+| Key | Source | Notes |
+|---|---|---|
+| `mysql.host` / `mysql.user` / `mysql.password` | `MYSQL_HOST` / `MYSQL_USER` / `MYSQL_PASSWORD` | required, no defaults |
+| `app_env` | `APP_ENV` | defaults to `development` |
+
+Use `${VAR}` (required) or `${VAR:default}` (optional) for env var substitution.
+
+## Build, run, deploy
+
+```bash
+uv run poe check      # lint, type check, test
+uv run poe test       # unit tests
+```
+
+Local dev: `docker compose up -d mysql` (or `uv run poe db`) starts MySQL, then
+`uv run poe serve` starts the dev server. Point `MYSQL_HOST=localhost`, `MYSQL_USER=root`,
+`MYSQL_PASSWORD=` (dev defaults in `settings.py`).
 
 ## Git workflow
 

@@ -28,6 +28,15 @@ application  →  http-api  →  usecase  ←  persistence
 - **`integrationTest`** — full-stack tests via docker-compose. `DockerComposeExtension`,
   `IntegrationTest` base class, WireMock + Kotest helpers.
 
+## Design principles
+
+- **Interfaces live where they're consumed.** `IHealthChecker` lives in `usecase` because that's
+  who needs it; `persistence` depends on `usecase` to implement it, not the other way around.
+- **Domain models are immutable.** Use sealed classes for distinct shapes (don't use nullable
+  fields or boolean flags).
+- **Every repository method is transactional.** Use `transaction { }` to wrap mutations.
+- **No framework leakage into `usecase`.** Don't import Ktor, Exposed, or Spring web types there.
+
 ## How to implement a new feature (walkthrough)
 
 Example: adding a new HTTP endpoint backed by new persisted state.
@@ -90,6 +99,34 @@ package layout. Integration tests in `integrationTest/` boot the full stack via 
 ./gradlew test                 # unit tests
 ./gradlew testCoverageReport   # aggregated JaCoCo report
 ```
+
+## Configuration
+
+`application/src/main/resources/application.yaml`:
+
+| Key | Source | Notes |
+|---|---|---|
+| `ktor.port` | `KTOR_PORT` | defaults to `8080` |
+| `ktor.wait` | fixed `true` | blocks main thread on the embedded server |
+| `mysql.host` / `mysql.user` / `mysql.password` | `MYSQL_HOST` / `MYSQL_USER` / `MYSQL_PASSWORD` | required, no defaults |
+
+Use `${VAR}` (required) or `${VAR:default}` (optional) for env var substitution.
+
+## Build, run, deploy
+
+```bash
+./gradlew clean build    # full build, same as CI
+./gradlew test           # unit tests only
+./gradlew detekt         # lint (auto-fixes what it can)
+```
+
+Local dev: `docker compose up -d mysql` (or root-level `npm run db`) starts MySQL only, then
+run via IntelliJ config in `.run/` with `MYSQL_HOST=localhost`, `MYSQL_USER=root`,
+`MYSQL_PASSWORD=` (dev defaults in `application.yaml`).
+
+Docker: repo-root `Dockerfile` is a multi-stage build (Gradle → `openjdk:21-slim` runtime)
+that ships backend only (no frontend in this template). `docker-compose.yml` at the root adds
+MySQL for full-stack runs.
 
 ## Git workflow
 
