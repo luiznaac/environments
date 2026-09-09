@@ -14,13 +14,14 @@ tooling with each other — treat them as separate repositories that happen to l
 place. `kotlin/` and `python/` deliberately share the *same architecture* (see §3), so a change to
 the shape of one should usually be mirrored in the other.
 
-## `kotlin/` — the Ktor + Spring + Exposed template
+## `kotlin/` — the Ktor + Spring + Exposed + Flyway template
 
 This is the literal template that [chameidor](../chameidor/DEVELOPMENT.md) and
 [portfolio-2](../portfolio-2/DEVELOPMENT.md) were both generated from (package root `dev.agner.template`,
 renamed to `dev.agner.<project>` on each new project). It is a **complete, runnable vertical slice**
 built around a single feature — a health check — implemented end-to-end through every layer, so a
-new project has a working example to copy from rather than empty folders.
+new project has a working example to copy from rather than empty folders. Includes schema versioning
+via Flyway migrations (see `kotlin/DEVELOPMENT.md`).
 
 ### Architecture (identical shape to chameidor/portfolio-2)
 
