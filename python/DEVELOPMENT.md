@@ -70,7 +70,8 @@ Example: a database-backed `widgets` catalog exposed over HTTP.
 4. **Implement the port** in `persistence/widgets/` — a SQLAlchemy entity on `Base`, plus
    `class WidgetRepository:` whose methods run inside `transaction_template.execute(...)` and use
    `current_session()`.
-5. **Add the table** to `mysql/init.sql`.
+5. **Write the migration** — see §3.5 — rather than adding to `mysql/init.sql` (that file no
+   longer exists).
 6. **Expose it**: `httpapi/controller/widget_controller.py` with a `router()` method; DTOs in
    `schema.py`.
 7. **Wire it** in `application/container.py`: build the repository, pass it to `WidgetService`,
@@ -78,6 +79,31 @@ Example: a database-backed `widgets` catalog exposed over HTTP.
 8. **Test** each layer: unit tests in `tests/unit/` (add shared builders to a `tests/fixtures.py`
    if more than one test needs them — don't hand-roll), integration test in `tests/integration/`
    if it crosses the DB/HTTP boundary.
+
+## Database migrations
+
+The schema is versioned SQL under `alembic/versions/` — there is no more `mysql/init.sql`. Two
+tools, each doing one half of the job:
+
+- **Alembic's autogenerate** (`uv run poe migrate:generate`, i.e. `alembic revision
+  --autogenerate`) *generates* a migration by diffing `Base.metadata` (populated by importing
+  every entity module — see `alembic/env.py`) against a live database. Always review the
+  generated file: the diff is mechanical and won't know a rename is a rename rather than a
+  drop-and-add, and its `Union`/`Optional` style needs no fixing since `alembic/script.py.mako`
+  already emits `from __future__ import annotations` and `X | None`.
+- **`scripts/migrate.py`** (`uv run poe migrate`) *applies* pending migrations. It runs as a
+  plain script — invoked from `deploy/entrypoint.sh` before the app starts, never from the app's
+  own startup — and baselines a database that already has tables but no `alembic_version` table
+  at `0001_baseline` instead of re-running it, then applies everything since. A failed migration
+  aborts the container instead of serving traffic against a stale schema.
+
+`tests/integration/test_migrations.py` is the guard: it migrates a throwaway Testcontainers MySQL
+to head and asserts Alembic's own `compare_metadata` against `Base.metadata` is empty. If an
+entity changes without a matching migration (or vice versa), this test fails.
+
+Alembic's own files (`alembic.ini`, `alembic/env.py`, `alembic/script.py.mako`,
+`alembic/versions/*.py`) live outside `src/template/`, so neither the import-linter contract
+nor mypy cover them — Ruff still does (`ruff check .` lints everything).
 
 ## Conventions
 
@@ -102,4 +128,4 @@ not need Docker; integration tests spin up MySQL via Testcontainers and are mark
 
 `template` -> `<project>` in: `src/template/` dir, `pyproject.toml` (`name`, hatch `packages`,
 `[tool.importlinter]` `root_package` + `containers`, `[tool.mypy]` `packages`), `Dockerfile`,
-`ci.yml`, `poe` tasks, and `MYSQL_DATABASE` in `docker-compose.yml` + `mysql/init.sql`.
+`deploy/entrypoint.sh`, `ci.yml`, `poe` tasks, and `MYSQL_DATABASE` in `docker-compose.yml`.
