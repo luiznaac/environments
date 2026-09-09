@@ -1,18 +1,18 @@
-# CLAUDE.md — python scaffold
+# DEVELOPMENT.md — Python scaffold
 
-Implementation guidelines for AI agents working in this scaffold. Follow the patterns below
-rather than inventing new ones — this is a template that gets copied forward, so consistency
-matters more than local cleverness.
+Development guidelines for anyone (human, agent, or tool) working in this scaffold. Follow the
+patterns below rather than inventing new ones — this is a template that gets copied forward, so
+consistency matters more than local cleverness.
 
-## 1. What this is
+## What this is
 
 Not an application. A **starter skeleton** for a Python backend service, deliberately the same
 architecture as the sibling [`kotlin/`](../kotlin) scaffold (which itself is the template behind
-[chameidor](../../chameidor/CLAUDE.md) and [portfolio-2](../../portfolio-2/CLAUDE.md)). One
-vertical slice is implemented end-to-end — a **health check**. Keep it intact and working; it's
-the reference example for "how do I wire a new port/adapter".
+[chameidor](../../chameidor/DEVELOPMENT.md) and [portfolio-2](../../portfolio-2/DEVELOPMENT.md)).
+One vertical slice is implemented end-to-end — a **health check**. Keep it intact and working;
+it's the reference example for "how do I wire a new port/adapter".
 
-## 2. Architecture
+## Architecture
 
 Layered hexagonal. **Dependencies only point inward.** Enforced by `import-linter`
 (`uv run poe contracts`), which fails the build on violation — the equivalent of the Gradle
@@ -57,7 +57,7 @@ and `controllers: list[IController]` — the hand-written equivalent of Spring c
 **Adding a health check or an endpoint means: write the class, then add one line to `container.py`.**
 Nothing is auto-discovered — that is the deliberate trade for an explicit, greppable graph.
 
-## 3. How to implement a new feature (walkthrough)
+## How to implement a new feature (walkthrough)
 
 Example: a database-backed `widgets` catalog exposed over HTTP.
 
@@ -79,7 +79,7 @@ Example: a database-backed `widgets` catalog exposed over HTTP.
    if more than one test needs them — don't hand-roll), integration test in `tests/integration/`
    if it crosses the DB/HTTP boundary.
 
-## 4. Conventions
+## Conventions
 
 - **`from __future__ import annotations`** at the top of every module.
 - Ports are `Protocol` with an `I` prefix; adapters need not inherit them (structural typing), but
@@ -92,13 +92,13 @@ Example: a database-backed `widgets` catalog exposed over HTTP.
 - Logs via `get_logger(__name__)`; event-style keys (`_log.info("widgets.listed", count=n)`).
 - Config via `Settings`; nested env vars use `__` (`MYSQL__HOST`).
 
-## 5. Code style / checks
+## Code style / checks
 
 `uv run poe check` must pass before a change is done. Ruff (lint + format, 120 cols), mypy
 `--strict`, import-linter, pytest. CI (`.github/workflows/ci.yml`) runs the same. Unit tests must
 not need Docker; integration tests spin up MySQL via Testcontainers and are marked `integration`.
 
-## 6. Renaming when starting a new project
+## Renaming when starting a new project
 
 `template` -> `<project>` in: `src/template/` dir, `pyproject.toml` (`name`, hatch `packages`,
 `[tool.importlinter]` `root_package` + `containers`, `[tool.mypy]` `packages`), `Dockerfile`,
