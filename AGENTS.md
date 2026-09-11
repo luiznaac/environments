@@ -1,4 +1,4 @@
-# DEVELOPMENT.md — environments
+# AGENTS.md — environments
 
 Development guidelines for anyone (human, agent, or tool) working in this repository.
 
@@ -9,19 +9,20 @@ per tech stack — used as the starting point for new projects. Nothing here run
 nothing depends on it at runtime. Changes here only matter for whatever project gets bootstrapped
 from a given scaffold *next*; they never affect an already-generated project retroactively.
 
-There are three independent scaffolds, `kotlin/`, `python/`, and `php/`. They do not share code or
-tooling with each other — treat them as separate repositories that happen to live in the same
-place. `kotlin/` and `python/` deliberately share the *same architecture* (see §3), so a change to
-the shape of one should usually be mirrored in the other.
+There are four independent scaffolds, `kotlin/`, `python/`, `php/`, and `react/`. They do not
+share code or tooling with each other — treat them as separate repositories that happen to live in
+the same place. `kotlin/` and `python/` deliberately share the *same architecture* (see below), so
+a change to the shape of one should usually be mirrored in the other. `react/` is what every
+project's `frontend/` was generated from — see [react/AGENTS.md](react/AGENTS.md).
 
 ## `kotlin/` — the Ktor + Spring + Exposed + Flyway template
 
-This is the literal template that [chameidor](../chameidor/DEVELOPMENT.md) and
-[portfolio-2](../portfolio-2/DEVELOPMENT.md) were both generated from (package root `dev.agner.template`,
+This is the literal template that [chameidor](../chameidor/AGENTS.md) and
+[portfolio-2](../portfolio-2/AGENTS.md) were both generated from (package root `dev.agner.template`,
 renamed to `dev.agner.<project>` on each new project). It is a **complete, runnable vertical slice**
 built around a single feature — a health check — implemented end-to-end through every layer, so a
 new project has a working example to copy from rather than empty folders. Includes schema versioning
-via Flyway migrations (see `kotlin/DEVELOPMENT.md`).
+via Flyway migrations (see `kotlin/AGENTS.md`).
 
 ### Architecture (identical shape to chameidor/portfolio-2)
 
@@ -40,7 +41,8 @@ application  →  http-api  →  usecase  ←  persistence
   HTTP health check.
 - `http-api` — `ControllerTemplate` (the routing interface every controller implements),
   `KtorConfig` (embedded Netty server wired via `Set<ControllerTemplate>`, see
-  [chameidor/DEVELOPMENT.md §2](../chameidor/DEVELOPMENT.md) for the full explanation of this wiring),
+  [chameidor/backend/AGENTS.md](../chameidor/backend/AGENTS.md) for the full explanation of this
+  wiring — its "Runtime wiring model" section),
   and `HealthController` as the one working example endpoint.
 - `application` — `Boot.kt` (Spring `@ComponentScan` + `runApplication`).
 - `integrationTest` — a fully working integration-test harness: `DockerComposeExtension`,
@@ -57,8 +59,8 @@ application  →  http-api  →  usecase  ←  persistence
   do I wire a new port/adapter through all four layers" — if you change the wiring pattern
   (`ControllerTemplate`, the Spring+Ktor DI bridge, the Exposed repository shape), update it here
   first and consistently through all four layers, since this is what gets copy-pasted forward.
-  See [chameidor/DEVELOPMENT.md §2–4](../chameidor/DEVELOPMENT.md) for the canonical description of that
-  wiring and the feature-implementation walkthrough — this template is the origin of that
+  See [chameidor/backend/AGENTS.md](../chameidor/backend/AGENTS.md) for the canonical description
+  of that wiring and the feature-implementation walkthrough — this template is the origin of that
   pattern, so the two documents should stay in sync.
 - **Detekt config here is the baseline.** `config/detekt/{config,format.yml}` and
   `gradle/libs.versions.toml` define the versions/rules new projects inherit. If you bump a
@@ -102,7 +104,7 @@ One package `src/template/`, one sub-package per layer. Key differences from `ko
 
 - Same "keep it minimal" rule as `kotlin/` — only patterns every new project should start with.
 - Keep the health-check slice intact and working through every layer.
-- `python/DEVELOPMENT.md` has the full architecture description and the feature walkthrough — keep
+- `python/AGENTS.md` has the full architecture description and the feature walkthrough — keep
   it in sync with the code and, where the shape changes, with `kotlin/`.
 - Full check bundle: `uv run poe check`.
 
@@ -121,9 +123,17 @@ locally.
 - Unlike the Kotlin template, this scaffold has no real feature example — it's a bare toolchain
   setup. Keep it that way unless you're deliberately adding a second reference example.
 
+## `react/` — the React + Vite frontend template
+
+The stack every project's `frontend/` (chameidor, portfolio-2, label-follower, shougong) was
+generated from — React 19, Vite 6, TypeScript, Tailwind v4, TanStack Query, React Router. Full
+detail in [react/AGENTS.md](react/AGENTS.md); unlike the other three scaffolds it ships with
+Biome + Vitest wired up already — see `template-sync` in the `salgadinhos` repo for porting that
+back into the four generated frontends, which don't have it yet.
+
 ## Git
 
 Remote: `git@github.com:luiznaac/environments.git`, single branch `master`. History is small and
 linear: initial commit → PHP scaffold → Kotlin scaffold → incremental refinements (JSON
-serializers, configurability, health-check fixes) → Python scaffold. Keep commits scoped to one
-scaffold at a time where possible, since they are otherwise unrelated.
+serializers, configurability, health-check fixes) → Python scaffold → React scaffold. Keep commits
+scoped to one scaffold at a time where possible, since they are otherwise unrelated.

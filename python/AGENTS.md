@@ -1,4 +1,4 @@
-# DEVELOPMENT.md — Python scaffold
+# AGENTS.md — Python scaffold
 
 Development guidelines for anyone (human, agent, or tool) working in this scaffold. Follow the
 patterns below rather than inventing new ones — this is a template that gets copied forward, so
@@ -8,7 +8,7 @@ consistency matters more than local cleverness.
 
 Not an application. A **starter skeleton** for a Python backend service, deliberately the same
 architecture as the sibling [`kotlin/`](../kotlin) scaffold (which itself is the template behind
-[chameidor](../../chameidor/DEVELOPMENT.md) and [portfolio-2](../../portfolio-2/DEVELOPMENT.md)).
+[chameidor](../../chameidor/AGENTS.md) and [portfolio-2](../../portfolio-2/AGENTS.md)).
 One vertical slice is implemented end-to-end — a **health check**. Keep it intact and working;
 it's the reference example for "how do I wire a new port/adapter".
 
@@ -70,8 +70,8 @@ Example: a database-backed `widgets` catalog exposed over HTTP.
 4. **Implement the port** in `persistence/widgets/` — a SQLAlchemy entity on `Base`, plus
    `class WidgetRepository:` whose methods run inside `transaction_template.execute(...)` and use
    `current_session()`.
-5. **Write the migration** — see §3.5 — rather than adding to `mysql/init.sql` (that file no
-   longer exists).
+5. **Write the migration** — see "Database migrations" below — rather than adding to
+   `mysql/init.sql` (that file no longer exists).
 6. **Expose it**: `httpapi/controller/widget_controller.py` with a `router()` method; DTOs in
    `schema.py`.
 7. **Wire it** in `application/container.py`: build the repository, pass it to `WidgetService`,

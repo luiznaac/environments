@@ -1,4 +1,4 @@
-# DEVELOPMENT.md — Kotlin template
+# AGENTS.md — Kotlin template
 
 Development guidelines for anyone (human, agent, or tool) working in this Gradle multi-module
 template. This is a complete, runnable vertical slice built around a single feature — a health
@@ -46,7 +46,7 @@ Example: adding a new HTTP endpoint backed by new persisted state.
 3. **Write the service** — constructor-injected, depends on the port.
 4. **Implement persistence** in `persistence/` — Exposed `Table`, `Entity`, and `@Component`
    repository.
-5. **Write the migration** — see §4 — rather than editing `mysql/init.sql`.
+5. **Write the migration** — see "Database migrations" below — rather than editing `mysql/init.sql`.
 6. **Expose it over HTTP** — `http-api/.../controller/` as a `@Component` class implementing
    `ControllerTemplate`. No manual registration needed.
 7. **Wire it** in `application/Boot.kt`'s component scanning.
