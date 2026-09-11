@@ -9,10 +9,11 @@ per tech stack — used as the starting point for new projects. Nothing here run
 nothing depends on it at runtime. Changes here only matter for whatever project gets bootstrapped
 from a given scaffold *next*; they never affect an already-generated project retroactively.
 
-There are three independent scaffolds, `kotlin/`, `python/`, and `php/`. They do not share code or
-tooling with each other — treat them as separate repositories that happen to live in the same
-place. `kotlin/` and `python/` deliberately share the *same architecture* (see §3), so a change to
-the shape of one should usually be mirrored in the other.
+There are four independent scaffolds, `kotlin/`, `python/`, `php/`, and `react/`. They do not
+share code or tooling with each other — treat them as separate repositories that happen to live in
+the same place. `kotlin/` and `python/` deliberately share the *same architecture* (see below), so
+a change to the shape of one should usually be mirrored in the other. `react/` is what every
+project's `frontend/` was generated from — see [react/AGENTS.md](react/AGENTS.md).
 
 ## `kotlin/` — the Ktor + Spring + Exposed + Flyway template
 
@@ -121,9 +122,17 @@ locally.
 - Unlike the Kotlin template, this scaffold has no real feature example — it's a bare toolchain
   setup. Keep it that way unless you're deliberately adding a second reference example.
 
+## `react/` — the React + Vite frontend template
+
+The stack every project's `frontend/` (chameidor, portfolio-2, label-follower, shougong) was
+generated from — React 19, Vite 6, TypeScript, Tailwind v4, TanStack Query, React Router. Full
+detail in [react/AGENTS.md](react/AGENTS.md); unlike the other three scaffolds it ships with
+Biome + Vitest wired up already — see `template-sync` in the `salgadinhos` repo for porting that
+back into the four generated frontends, which don't have it yet.
+
 ## Git
 
 Remote: `git@github.com:luiznaac/environments.git`, single branch `master`. History is small and
 linear: initial commit → PHP scaffold → Kotlin scaffold → incremental refinements (JSON
-serializers, configurability, health-check fixes) → Python scaffold. Keep commits scoped to one
-scaffold at a time where possible, since they are otherwise unrelated.
+serializers, configurability, health-check fixes) → Python scaffold → React scaffold. Keep commits
+scoped to one scaffold at a time where possible, since they are otherwise unrelated.

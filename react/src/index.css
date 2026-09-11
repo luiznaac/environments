@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+/* Tailwind v4: theme customization lives here, not in tailwind.config.js — see AGENTS.md. */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-slate-950 text-slate-200 font-sans antialiased;
+  }
+}
