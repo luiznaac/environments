@@ -1,4 +1,4 @@
-# DEVELOPMENT.md — environments
+# AGENTS.md — environments
 
 Development guidelines for anyone (human, agent, or tool) working in this repository.
 
@@ -21,7 +21,7 @@ This is the literal template that [chameidor](../chameidor/DEVELOPMENT.md) and
 renamed to `dev.agner.<project>` on each new project). It is a **complete, runnable vertical slice**
 built around a single feature — a health check — implemented end-to-end through every layer, so a
 new project has a working example to copy from rather than empty folders. Includes schema versioning
-via Flyway migrations (see `kotlin/DEVELOPMENT.md`).
+via Flyway migrations (see `kotlin/AGENTS.md`).
 
 ### Architecture (identical shape to chameidor/portfolio-2)
 

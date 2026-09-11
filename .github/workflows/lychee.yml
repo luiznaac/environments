@@ -1,0 +1,17 @@
+name: Link check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  lychee:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --no-progress --exclude-loopback "**/*.md"
+          fail: true

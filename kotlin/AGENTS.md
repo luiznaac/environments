@@ -1,4 +1,4 @@
-# DEVELOPMENT.md — Kotlin template
+# AGENTS.md — Kotlin template
 
 Development guidelines for anyone (human, agent, or tool) working in this Gradle multi-module
 template. This is a complete, runnable vertical slice built around a single feature — a health

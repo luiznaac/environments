@@ -1,4 +1,4 @@
-# DEVELOPMENT.md — Python scaffold
+# AGENTS.md — Python scaffold
 
 Development guidelines for anyone (human, agent, or tool) working in this scaffold. Follow the
 patterns below rather than inventing new ones — this is a template that gets copied forward, so
