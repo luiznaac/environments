@@ -11,7 +11,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The docs deliberately link into the sibling repos (../chameidor,
+      # ../portfolio-2) that this template spawned. Only environments is
+      # checked out here, so those links can never resolve in CI — exclude
+      # them rather than leave the check permanently red. lychee rewrites
+      # relative paths to file:// URLs before matching, hence the prefix.
       - uses: lycheeverse/lychee-action@v2
         with:
-          args: --no-progress --exclude-loopback "**/*.md"
+          args: >-
+            --no-progress --exclude-loopback
+            --exclude 'file:///chameidor'
+            --exclude 'file:///portfolio-2'
+            "**/*.md"
           fail: true
