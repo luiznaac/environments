@@ -36,4 +36,4 @@ Copy the `python/` folder, then rename the `template` package: the directory
 `root_package` / container names in `[tool.importlinter]`, the module paths in
 `Dockerfile` / `ci.yml` / `poe` tasks, and the `MYSQL_DATABASE` in `docker-compose.yml`.
 
-See [CLAUDE.md](CLAUDE.md) for the architecture and the rules for evolving it.
+See [AGENTS.md](AGENTS.md) for the architecture and the rules for evolving it.

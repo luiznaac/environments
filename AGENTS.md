@@ -17,8 +17,8 @@ project's `frontend/` was generated from — see [react/AGENTS.md](react/AGENTS.
 
 ## `kotlin/` — the Ktor + Spring + Exposed + Flyway template
 
-This is the literal template that [chameidor](../chameidor/DEVELOPMENT.md) and
-[portfolio-2](../portfolio-2/DEVELOPMENT.md) were both generated from (package root `dev.agner.template`,
+This is the literal template that [chameidor](../chameidor/AGENTS.md) and
+[portfolio-2](../portfolio-2/AGENTS.md) were both generated from (package root `dev.agner.template`,
 renamed to `dev.agner.<project>` on each new project). It is a **complete, runnable vertical slice**
 built around a single feature — a health check — implemented end-to-end through every layer, so a
 new project has a working example to copy from rather than empty folders. Includes schema versioning
@@ -41,7 +41,8 @@ application  →  http-api  →  usecase  ←  persistence
   HTTP health check.
 - `http-api` — `ControllerTemplate` (the routing interface every controller implements),
   `KtorConfig` (embedded Netty server wired via `Set<ControllerTemplate>`, see
-  [chameidor/DEVELOPMENT.md §2](../chameidor/DEVELOPMENT.md) for the full explanation of this wiring),
+  [chameidor/backend/AGENTS.md](../chameidor/backend/AGENTS.md) for the full explanation of this
+  wiring — its "Runtime wiring model" section),
   and `HealthController` as the one working example endpoint.
 - `application` — `Boot.kt` (Spring `@ComponentScan` + `runApplication`).
 - `integrationTest` — a fully working integration-test harness: `DockerComposeExtension`,
@@ -58,8 +59,8 @@ application  →  http-api  →  usecase  ←  persistence
   do I wire a new port/adapter through all four layers" — if you change the wiring pattern
   (`ControllerTemplate`, the Spring+Ktor DI bridge, the Exposed repository shape), update it here
   first and consistently through all four layers, since this is what gets copy-pasted forward.
-  See [chameidor/DEVELOPMENT.md §2–4](../chameidor/DEVELOPMENT.md) for the canonical description of that
-  wiring and the feature-implementation walkthrough — this template is the origin of that
+  See [chameidor/backend/AGENTS.md](../chameidor/backend/AGENTS.md) for the canonical description
+  of that wiring and the feature-implementation walkthrough — this template is the origin of that
   pattern, so the two documents should stay in sync.
 - **Detekt config here is the baseline.** `config/detekt/{config,format.yml}` and
   `gradle/libs.versions.toml` define the versions/rules new projects inherit. If you bump a
@@ -103,7 +104,7 @@ One package `src/template/`, one sub-package per layer. Key differences from `ko
 
 - Same "keep it minimal" rule as `kotlin/` — only patterns every new project should start with.
 - Keep the health-check slice intact and working through every layer.
-- `python/DEVELOPMENT.md` has the full architecture description and the feature walkthrough — keep
+- `python/AGENTS.md` has the full architecture description and the feature walkthrough — keep
   it in sync with the code and, where the shape changes, with `kotlin/`.
 - Full check bundle: `uv run poe check`.
 

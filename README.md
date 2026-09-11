@@ -50,5 +50,5 @@ Bootstrapping a new personal project from a battle-tested skeleton is faster and
 than starting from an empty folder each time — and any improvement made here (a better Docker
 setup, a stricter lint rule, a nicer test harness) benefits every future project built from it.
 
-See [CLAUDE.md](CLAUDE.md) for details on the internal structure of each scaffold if you're
+See [AGENTS.md](AGENTS.md) for details on the internal structure of each scaffold if you're
 modifying them.
