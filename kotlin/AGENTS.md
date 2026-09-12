@@ -225,11 +225,19 @@ export PATH="$JAVA_HOME/bin:$PATH"
 java -version                               # confirm: openjdk version "21.x"
 ```
 
-**Nível 3 — no JDK 21 anywhere.** Use the toolchain image instead of installing one:
+**Nível 3 — no JDK 21 anywhere.** Use the toolchain image instead of installing one. The image
+ships the Gradle distribution, so call `gradle` directly — the wrapper would download its own
+distribution and can time out inside the container:
 
 ```bash
-docker run --rm -v "$PWD":/w -w /w gradle:8-jdk21 ./gradlew --no-daemon clean build
+docker run --rm -v "$PWD":/w -w /w -v /var/run/docker.sock:/var/run/docker.sock \
+    gradle:8-jdk21 gradle --no-daemon clean build
 ```
+
+On Windows the socket mount is `//var/run/docker.sock:/var/run/docker.sock` (or
+`\\.\pipe\docker_engine:\\.\pipe\docker_engine`, depending on the Docker Desktop backend). The
+socket is what lets `integrationTest` reach the host daemon via Testcontainers — without it the
+suite fails even though Docker is up, so mount it whenever the run will execute tests.
 
 `--no-daemon` matters here: a daemon inside a throwaway container is pure overhead, and it can
 outlive the build and hold a lock on the Gradle cache volume.
@@ -243,7 +251,9 @@ never compiled is not a green build — say which rung of the ladder you got stu
 compile → detekt → unit tests → the `integrationTest` module → packaging. Two consequences worth
 knowing before you trust a local run:
 
-- **`integrationTest` needs Docker.** It boots MySQL through `DockerComposeExtension` (Testcontainers).
+- **`integrationTest` is local-only and never "passes" when it didn't run.** It depends on
+  Testcontainers reaching the host daemon (`DockerComposeExtension` boots MySQL), so a suite that
+  was skipped or failed for the environment is reported as **"não executado"**, never as green.
   With Docker down, `build` fails in the `integrationTest` module — that is a *local environment*
   failure, not a code failure. Don't chase it in the diff; start Docker.
 - **A green `test` is not a green `build`.** `./gradlew test` runs the `integrationTest` module too,
