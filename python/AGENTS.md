@@ -156,10 +156,7 @@ Local dev: `docker compose up -d mysql` (or `uv run poe db`) starts MySQL, then
 `uv run poe serve` starts the dev server. Point `MYSQL_HOST=localhost`, `MYSQL_USER=root`,
 `MYSQL_PASSWORD=` (dev defaults in `settings.py`).
 
-## Git workflow
-
-**Do not commit directly to `master`.** Always create a feature branch and open a PR,
-even for a small or "obviously safe" change. This applies to all contributors.
+Git/PR conventions: see `salgadinhos/global/AGENTS.md`.
 
 ## Renaming when starting a new project
 
