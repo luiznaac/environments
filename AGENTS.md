@@ -131,6 +131,14 @@ detail in [react/AGENTS.md](react/AGENTS.md); unlike the other three scaffolds i
 Biome + Vitest wired up already — see `template-sync` in the `salgadinhos` repo for porting that
 back into the four generated frontends, which don't have it yet.
 
+## Pre-commit
+
+`kotlin/`, `python/`, `react/` and `php/` each carry a `.pre-commit-config.yaml` at their root
+with `no-commit-to-branch` (protects `master`). `python/` also wires its stack lint (ruff, mypy,
+import-linter) into the same file; keep any new scaffold consistent — every scaffold gets the
+branch guard, and whatever lint the stack has is wired into the same file. A new project generated
+from a scaffold inherits this guard by copying the scaffold's `.pre-commit-config.yaml`.
+
 ## Git
 
 Remote: `git@github.com:luiznaac/environments.git`, single branch `master`. History is small and
