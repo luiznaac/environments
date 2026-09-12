@@ -128,10 +128,7 @@ Docker: repo-root `Dockerfile` is a multi-stage build (Gradle → `openjdk:21-sl
 that ships backend only (no frontend in this template). `docker-compose.yml` at the root adds
 MySQL for full-stack runs.
 
-## Git workflow
-
-**Do not commit directly to `master`.** Always create a feature branch and open a PR,
-even for a small or "obviously safe" change. This applies to all contributors.
+Git/PR conventions: see `salgadinhos/global/AGENTS.md`.
 
 Renaming when starting a new project:
 

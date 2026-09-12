@@ -60,7 +60,4 @@ checks.
 `template` → `<project>` in: `package.json` (`name`), `index.html` (`<title>`), `vite.config.ts`
 (the `/template/` production base path).
 
-## Git workflow
-
-**Do not commit directly to `master`.** Always create a feature branch and open a PR, even for a
-small or "obviously safe" change. This applies to all contributors.
+Git/PR conventions: see `salgadinhos/global/AGENTS.md`.
