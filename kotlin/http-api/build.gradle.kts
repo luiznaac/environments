@@ -12,4 +12,5 @@ dependencies {
     implementation(libs.ktor.jackson)
 
     testImplementation(libs.bundles.testDependencies)
+    testImplementation(libs.ktor.server.test.host)
 }

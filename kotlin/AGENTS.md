@@ -84,6 +84,29 @@ migrates the compose-provided MySQL to head before any spec runs, and this test 
 `MigrationUtils.statementsRequiredForDatabaseMigration(*allTables)` is empty. If a `Table`
 changes without a matching migration (or vice versa), this test fails.
 
+## Domain errors
+
+A domain exception carries a stable `error` code, a user-facing `message` and a developer
+`detail`, and knows nothing about HTTP:
+
+```kotlin
+abstract class DomainException(
+    val error: String,
+    val userMessage: String,
+    val detail: String,
+) : RuntimeException(detail)
+```
+
+`http-api` turns it into a response in three pieces:
+
+- **`DomainExceptionStatusMapper`** maps a concrete exception to an `HttpStatusCode`, defaulting
+  to `400`. Add a branch per exception that needs another status
+  (`is NotFoundException -> HttpStatusCode.NotFound`).
+- **`installDomainExceptionHandler`** is the one `StatusPages` handler; it is the only place the
+  `{"error", "message", "detail"}` body is built.
+- **`KtorConfig`** only calls `installDomainExceptionHandler(mapper)`. Register the generic
+  handler once, let the mapper choose the status, and never add a per-exception handler there.
+
 ## Code style
 
 Detekt enforces: `config/detekt/{config,format.yml}`, `maxIssues: 0`, `autoCorrect: true`,
