@@ -208,9 +208,9 @@ Use `${VAR}` (required) or `${VAR:default}` (optional) for env var substitution.
 `allWarningsAsErrors = true` and the Java toolchain pinned to 21 mean a surprising number of
 "Cannot compile" errors are really "no JDK". Work down this ladder before touching any code:
 
-**Nível 1 — a JDK 21 is on `PATH`.** Nothing to do; `./gradlew` works.
+**Level 1 — a JDK 21 is on `PATH`.** Nothing to do; `./gradlew` works.
 
-**Nível 2 — JDK installed but not exported.** This is the common case on Windows, where IntelliJ
+**Level 2 — JDK installed but not exported.** This is the common case on Windows, where IntelliJ
 downloads a JDK under `~/.jdks` and never puts it on `PATH`. Symptom is exactly:
 
 ```
@@ -226,7 +226,7 @@ export PATH="$JAVA_HOME/bin:$PATH"
 java -version                               # confirm: openjdk version "21.x"
 ```
 
-**Nível 3 — no JDK 21 anywhere.** Use the toolchain image instead of installing one. The image
+**Level 3 — no JDK 21 anywhere.** Use the toolchain image instead of installing one. The image
 ships the Gradle distribution, so call `gradle` directly — the wrapper would download its own
 distribution and can time out inside the container:
 
