@@ -21,6 +21,7 @@ import org.springframework.context.annotation.Configuration
 class KtorConfig(
     private val routes: Set<ControllerTemplate>,
     private val mapper: ObjectMapper,
+    private val domainExceptionStatusMapper: DomainExceptionStatusMapper,
     @Value("\${ktor.wait}") wait: Boolean,
     @Value("\${ktor.port}") port: Int,
 ) {
@@ -39,6 +40,8 @@ class KtorConfig(
             install(ContentNegotiation) {
                 register(ContentType.Application.Json, JacksonConverter(mapper))
             }
+
+            installDomainExceptionHandler(domainExceptionStatusMapper)
 
             install(CORS) {
                 allowMethod(HttpMethod.Options)
