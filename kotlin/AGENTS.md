@@ -174,8 +174,9 @@ already does it, and it's faster than you are.
 
 ## Testing
 
-Kotest `StringSpec`, MockK. Unit tests live in each module's `src/test/kotlin`, mirroring the main
-package layout. Integration tests in `integrationTest/` boot the full stack via docker-compose.
+Kotest `StringSpec` for unit specs and `DescribeSpec` for HTTP/`testApplication` specs, MockK.
+Unit tests live in each module's `src/test/kotlin`, mirroring the main package layout.
+Integration tests in `integrationTest/` boot the full stack via docker-compose.
 
 ```bash
 ./gradlew test                 # unit + integration tests (integrationTest needs Docker)
