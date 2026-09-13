@@ -235,10 +235,9 @@ docker run --rm -v "$PWD":/w -w /w -v /var/run/docker.sock:/var/run/docker.sock 
     gradle:8-jdk21 gradle --no-daemon clean build
 ```
 
-On Windows the socket mount is `//var/run/docker.sock:/var/run/docker.sock` (or
-`\\.\pipe\docker_engine:\\.\pipe\docker_engine`, depending on the Docker Desktop backend). The
-socket is what lets `integrationTest` reach the host daemon via Testcontainers — without it the
-suite fails even though Docker is up, so mount it whenever the run will execute tests.
+On Windows the socket mount is `//var/run/docker.sock:/var/run/docker.sock`. The socket is what lets
+`integrationTest` reach the host daemon via Testcontainers — without it the suite fails even though
+Docker is up, so mount it whenever the run will execute tests.
 
 `--no-daemon` matters here: a daemon inside a throwaway container is pure overhead, and it can
 outlive the build and hold a lock on the Gradle cache volume.
