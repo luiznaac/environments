@@ -69,11 +69,21 @@ class DomainExceptionHandlingTest : DescribeSpec({
                 client.get("/boom").status shouldBe HttpStatusCode.BadRequest
             }
         }
+
+        it("does not map an unexpected internal failure to the client-error contract") {
+            testApplication {
+                application { installThrowingRoute(IllegalStateException("unexpected")) }
+
+                // StatusPages only maps DomainException, so an internal failure must stay a 500
+                // instead of becoming a 400 with the domain-shaped body.
+                client.get("/boom").status shouldBe HttpStatusCode.InternalServerError
+            }
+        }
     }
 })
 
 private fun Application.installThrowingRoute(
-    exception: DomainException,
+    exception: Throwable,
     mapper: DomainExceptionStatusMapper = DefaultDomainExceptionStatusMapper(),
 ) {
     install(ContentNegotiation) {
