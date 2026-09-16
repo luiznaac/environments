@@ -229,6 +229,43 @@ declared later, as detection reports them per lane. Re-runs are idempotent (an a
 lane reports the open PR instead of a duplicate) and bootstrapping never applies scaffold
 changes — it only pins the baseline.
 
+### Sweeps
+
+Two sweeps keep the propagation queue visible and drained (`.github/workflows/template-sweep.yml`):
+
+- **Mechanical** — weekly (Mondays 12:17 UTC ≈ 09:00 BRT, after Dependabot's run) plus on every
+  push touching a scaffold, tool or this workflow. It checks out the family, runs the detector
+  (`template-check`, read-only), collects the advisory (pin-vs-target queue per lane, classified
+  by manifest class), and — only when armed — opens the propagation PRs
+  (`template-propagate --open-pr`) and posts the advisory.
+- **Judgment** — the same run renders the weekly judgment queue (judgment-class entries +
+  unclassified changes) and, when armed, opens at most one open `Judgment sweep <week>` issue
+  (label `template-sync`) per week. That issue is the work order for the scheduled porting
+  session (the `template-sync` skill in `salgadinhos`), which closes it once every item has
+  landed as a PR or a declared waiver. The session's schedule lives outside this repo — any
+  scheduler (OpenChamber, a cron on the machine holding the family checkout) that can run
+  `opencode run` with the `template-sync` prompt will do; the issue is the durable queue.
+
+**Arming.** The cross-repo steps (propagation PRs, advisory comments, the weekly issue) need a
+fine-grained PAT in the `TEMPLATE_SWEEP_TOKEN` secret: Contents read/write + Pull requests
+read/write on `chameidor`, `portfolio-2`, `label-follower`, `shougong`, plus Issues read/write on
+`environments` (the weekly issue) and Contents read on `salgadinhos` (the restatement baseline).
+Without the secret the sweep still runs the detector and the collect step, and warns that it is
+not armed — it never fails a push on its own findings.
+
+**Advisory.** `tools/sweep-advisory.mjs` renders a sticky, non-blocking comment on every open PR
+of a family repo whose lane has a queue (created once, patched in place, matched by the
+`<!-- template-sweep advisory -->` marker; never posted when a lane is at its pin, and patched
+to a "current" body when a queue drains). The comment lists the mechanical queue with the exact
+applier command, flags judgment entries for the porting skill, shows waivers (renúncia) and
+unclassified changes, and states that it never gates a merge. The sweep's own propagation PRs
+(`salgadinhos/propagate-*`) are skipped — their body already is the queue.
+
+```bash
+node tools/sweep-advisory.mjs --collect --code-root .. --output sweep-collect.json
+node tools/sweep-advisory.mjs --apply [--issue] --input sweep-collect.json
+```
+
 ### Creation
 
 `tools/new-project.mjs` instantiates a scaffold into a new project lane:
