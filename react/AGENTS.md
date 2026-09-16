@@ -8,8 +8,8 @@ worked example. Keep it intact; it's the reference for "how do I wire a new API 
 layer" (client → query hook → page).
 
 Unlike the four generated frontends today, this scaffold ships with **Biome (lint+format) and
-Vitest wired up from the start** — see `template-sync` in salgadinhos for porting that back into
-them.
+Vitest wired up from the start** — drift detection in `environments` reports when that has been
+ported back into them.
 
 ## Layout
 
@@ -43,11 +43,11 @@ npm run build         # tsc -b && vite build
 
 ## Dev proxy / deployment base path
 
-`vite.config.ts`'s `base` defaults to `/template/` in a production build (override with
-`VITE_BASE` — rename `template` when this scaffold is copied into a new project) and `/` in dev.
-The dev server proxies `/api` to `VITE_API_TARGET` (default `http://localhost:8080`) to dodge
-CORS — see `react-spa-screen` in salgadinhos for why this exists (the unified dashboard reverse
-proxy).
+`vite.config.ts`'s `base` defaults to `/template/` in a production build and `/` in dev; the
+creation tooling rewrites the production base path from the manifest's `instantiate:` section,
+and `VITE_BASE` overrides it. The dev server proxies `/api` to `VITE_API_TARGET` (default
+`http://localhost:8080`) to dodge CORS — a generated project is served under a sub-path behind
+the unified dashboard reverse proxy.
 
 ## Testing scope
 
@@ -55,9 +55,11 @@ Only `src/lib/**` has tests (`vitest.config.ts` restricts `include` to it) — p
 rendering. No component/render tests yet; don't claim UI coverage beyond what this actually
 checks.
 
-## Renaming when starting a new project
+## Instantiation
 
-`template` → `<project>` in: `package.json` (`name`), `index.html` (`<title>`), `vite.config.ts`
-(the `/template/` production base path).
+New projects are instantiated from this scaffold by the `new-project` script in `environments` —
+it applies the `template` renames (package name, base path, title) from the manifest's
+`instantiate:` section, stamps the lane sentinel and makes the first commit; the creation skill in
+`salgadinhos` drives the parameters and the follow-up. Don't rename by hand.
 
 Git/PR conventions: see `salgadinhos/global/AGENTS.md`.

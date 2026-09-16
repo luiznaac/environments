@@ -24,5 +24,18 @@ entries:
 # Word-boundary token the scaffold uses as its own name; the creation tooling replaces it with
 # the project name (covers `template-fe` in package.json, the `/template/` base path and the
 # index.html title). template-check reuses it to normalize scaffold files against a project.
+#
+# `instantiate` is also the creation contract read by tools/new-project.mjs: the lane dir, the
+# fast check, the files where the token is legitimately part of the scaffold (not a placeholder),
+# and the convention values with their per-file literals for CLI overrides.
 instantiate:
   name: template
+  lane: frontend
+  check: npm ci && npm run check
+  values:
+    basePath:
+      # The override is the complete base path (`/` + project + `/`).
+      style: whole
+      replacements:
+        vite.config.ts:
+          - /template/
