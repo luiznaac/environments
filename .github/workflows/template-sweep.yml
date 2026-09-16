@@ -1,0 +1,120 @@
+name: Template sweep
+
+# The two sweeps of the propagation flow (see environments/AGENTS.md -> "Sweeps"):
+#   - mechanical: detector (template-check, read-only), then the applier (template-propagate,
+#     one PR per repo) and the advisory (sticky comments on every open PR) — all gated on
+#     TEMPLATE_SWEEP_TOKEN; without it the run degrades to detection + report with a warning.
+#   - judgment: the weekly "Judgment sweep <week>" issue, opened at most once per week, is the
+#     work order the scheduled template-sync session resolves.
+
+on:
+  schedule:
+    # Mondays 12:17 UTC (about 09:00 BRT, right after Dependabot's Monday 06:00 BRT run).
+    - cron: "17 12 * * 1"
+  push:
+    branches: [master]
+    paths:
+      - "kotlin/**"
+      - "python/**"
+      - "php/**"
+      - "react/**"
+      - "tools/**"
+      - ".github/workflows/template-sweep.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: template-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    env:
+      SWEEP_TOKEN: ${{ secrets.TEMPLATE_SWEEP_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Check out the family repos (public, shallow)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for repo in chameidor portfolio-2 label-follower shougong; do
+            gh repo clone "luiznaac/$repo" "../$repo" -- --depth 1
+          done
+
+      - name: Check out the salgadinhos baseline (restatement input)
+        if: env.SWEEP_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.TEMPLATE_SWEEP_TOKEN }}
+        run: gh repo clone luiznaac/salgadinhos ../salgadinhos -- --depth 1
+
+      - name: Detector (template-check, read-only)
+        run: |
+          set +e
+          if [ -d ../salgadinhos ]; then
+            node tools/template-check.mjs --code-root .. > sweep-detector.txt 2>&1
+          else
+            printf '# stub: salgadinhos not checked out (TEMPLATE_SWEEP_TOKEN unset)\n' > ../global-stub.md
+            node tools/template-check.mjs --code-root .. --global-agents "$PWD/../global-stub.md" > sweep-detector.txt 2>&1
+          fi
+          code=$?
+          set -e
+          {
+            echo "### Template drift (detector)"
+            echo '```'
+            cat sweep-detector.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -eq 2 ]; then exit 2; fi
+          exit 0
+
+      - name: Advisory collect (read-only)
+        env:
+          GH_TOKEN: ${{ secrets.TEMPLATE_SWEEP_TOKEN || github.token }}
+        run: |
+          node tools/sweep-advisory.mjs --collect --code-root .. --sweep-repo "$GITHUB_REPOSITORY" --output sweep-collect.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Mechanical sweep (applier, one PR per repo)
+        if: env.SWEEP_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.TEMPLATE_SWEEP_TOKEN }}
+        run: |
+          git config --global user.name "salgadinhos-sweep"
+          git config --global user.email "salgadinhos-sweep@users.noreply.github.com"
+          gh auth setup-git
+          # --skip-check: the sweep runs on a bare runner; the destination repo's CI on the
+          # propagation PR is the fast check here (rung 2 of the verification ladder).
+          node tools/template-propagate.mjs --open-pr --skip-check --code-root ..
+
+      - name: Advisory apply (sticky comments)
+        if: env.SWEEP_TOKEN != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.TEMPLATE_SWEEP_TOKEN }}
+        run: node tools/sweep-advisory.mjs --apply --input sweep-collect.json
+
+      - name: Judgment issue (weekly, schedule/dispatch only)
+        if: env.SWEEP_TOKEN != '' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.TEMPLATE_SWEEP_TOKEN }}
+        run: node tools/sweep-advisory.mjs --apply --input sweep-collect.json --issue
+
+      - name: Sweep not armed
+        if: env.SWEEP_TOKEN == ''
+        run: |
+          echo "::warning::TEMPLATE_SWEEP_TOKEN is not set — propagation PRs, advisory comments and the weekly judgment issue were skipped. See environments/AGENTS.md -> Sweeps to arm the sweep."
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: template-sweep
+          path: |
+            sweep-detector.txt
+            sweep-collect.json
+          if-no-files-found: ignore
