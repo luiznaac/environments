@@ -192,10 +192,12 @@ export function rewriteProjectManifest({ entries }) {
   return `${lines.join("\n")}\n`;
 }
 
-// One sentinel per lane; creation is revision 1, the scaffold_sha is the immutable pin.
-export function sentinelText({ source, lane, scaffoldSha, revision = 1 }) {
+// One sentinel per lane; creation is revision 1, the scaffold_sha is the immutable pin. The
+// `note` says who stamped it ("creation", or "bootstrap" when the applier stamps an existing
+// project's lineage); only the applier ever advances `applied` afterwards.
+export function sentinelText({ source, lane, scaffoldSha, revision = 1, note = "creation" }) {
   return [
-    `# Lane lineage for the ${source} scaffold: written at creation, advanced only by propagation.`,
+    `# Lane lineage for the ${source} scaffold: written at ${note}, advanced only by propagation.`,
     "# `allow` records accepted divergences ({ entry, reason }).",
     `source: ${source}`,
     `lane: ${lane}`,
@@ -273,7 +275,8 @@ function rewriteTokenContents(rootDir, { token, name, keep }) {
   }
 }
 
-const sentinelFileName = (lane) => (lane === "." ? "root" : lane.split(/[\\/]/).filter(Boolean).join("-"));
+// The sentinel file a lane is named after (`backend` -> `backend.yml`, a root lane -> `root.yml`).
+export const sentinelFileName = (lane) => (lane === "." ? "root" : lane.split(/[\\/]/).filter(Boolean).join("-"));
 
 function git(args, cwd) {
   return spawnSync("git", args, { cwd, encoding: "utf8" });

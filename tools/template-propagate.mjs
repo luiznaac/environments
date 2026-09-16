@@ -14,6 +14,15 @@
 // A lane whose sentinel `allow`s an entry waives it: the entry is skipped and the pin still
 // advances (renúncia), with `seen_in` stamped on the waiver the first time the applier sees it.
 //
+// `--bootstrap` is the other way a lane enters the flow: an existing project that predates the
+// tooling has no sentinel on its default branch, so the lanes are named explicitly
+// (`--project <name>` plus one `--lane <dir>=<source>` per lane) and the applier stamps each
+// missing `.salgadinhos/<lane>.yml` (revision 1, pinned at the target commit, `allow: []`) on
+// a branch of its own — one PR per repo, never a push to the default branch, and never a file
+// outside `.salgadinhos/` touched. The bootstrap pins the lane at the target, so its queue
+// starts empty and fills as the scaffold moves; re-runs find the sentinel already stamped and
+// report the open PR instead of duplicating it.
+//
 // Flow per repo: clone -> branch -> apply every lane -> run each lane's declared fast check ->
 // commit -> push branch -> open exactly one PR (`gh`). Dry-run (the default) stops before push.
 //
@@ -21,6 +30,8 @@
 //   node tools/template-propagate.mjs [--open-pr] [--dry-run] [--project <name>] [--to <sha>]
 //                                     [--code-root <dir>] [--skip-check] [--keep-scratch]
 //                                     [--check-timeout <seconds>]
+//   node tools/template-propagate.mjs --bootstrap --open-pr --project <name>
+//                                     --lane <dir>=<source> [--lane <dir>=<source> ...]
 //
 // Exit codes: 0 clean (including "nothing to propagate"), 1 a repo failed (fast check, push, PR),
 // 2 global config error.
@@ -40,6 +51,7 @@ import {
   parseVersionCatalog,
   resolveRoots,
 } from "./template-check.mjs";
+import { sentinelFileName, sentinelText } from "./new-project.mjs";
 
 export { ConfigError };
 
@@ -471,8 +483,31 @@ function transformEntry({ entry, scaffoldText, projectText, token, name }) {
   return result.changes.length > 0 ? result : { text: null, changes: [] };
 }
 
-function planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, projectName, gitEnv }) {
+// A plan starts as this skeleton; the normal (non-bootstrap) path fills applies/skipped etc.
+const basePlan = ({ lane, source, sentinelFile, pin, target, revision = (pin ? null : 1) }) => ({
+  lane,
+  source,
+  sentinelFile,
+  pin,
+  target,
+  revision,
+  applies: [],
+  skipped: [],
+  unclassified: [],
+  observedAllows: [],
+  check: null,
+});
+
+function planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, projectName, gitEnv, bootstrap = false }) {
   const sentinelPath = join(cloneDir, ".salgadinhos", laneSpec.sentinelFile);
+  if (bootstrap) {
+    if (existsSync(sentinelPath)) return null;
+    manifestFor(laneSpec.source); // a bogus source must not get a stamped lineage
+    if (laneSpec.lane !== "." && !existsSync(join(cloneDir, laneSpec.lane))) {
+      throw new ConfigError(`lane '${laneSpec.lane}' is not on the default branch of ${projectName} — a sentinel for a missing lane would poison discovery`);
+    }
+    return { ...basePlan({ lane: laneSpec.lane, source: laneSpec.source, sentinelFile: laneSpec.sentinelFile, pin: null, target }), bootstrapped: true };
+  }
   if (!existsSync(sentinelPath)) {
     throw new ConfigError(`sentinel .salgadinhos/${laneSpec.sentinelFile} is not on the default branch — push the sentinel before propagating`);
   }
@@ -483,19 +518,14 @@ function planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, p
     throw new ConfigError(`pin ${shortSha(pin)} is not an ancestor of ${shortSha(target)} — scaffold history was rewritten?`);
   }
   const manifest = manifestFor(sentinel.source);
-  const plan = {
+  const plan = basePlan({
     lane: laneSpec.lane,
     source: sentinel.source,
     sentinelFile: laneSpec.sentinelFile,
     pin,
     target,
     revision: (sentinel.applied.revision ?? 0) + 1,
-    applies: [],
-    skipped: [],
-    unclassified: [],
-    observedAllows: [],
-    check: null,
-  };
+  });
   if (pin === target) return plan;
   for (const file of changedScaffoldFiles(environmentsPath, sentinel.source, pin, target, gitEnv)) {
     const entry = manifest.entries[file];
@@ -538,6 +568,15 @@ function updateLaneSentinel(plan, cloneDir, target) {
   writeFileSync(sentinelPath, updateSentinelText(text, { revision: plan.revision, scaffoldSha: target, observedAllows: plan.observedAllows }));
 }
 
+// The closing lines every applier PR carries.
+const prTrailer = (command) => [
+  "---",
+  "",
+  `Opened by \`tools/template-propagate.mjs${command}\` (one PR per repo; roll back by closing this PR).`,
+  "The applier never pushes to the base branch directly.",
+  "",
+];
+
 function prBody(target, plans) {
   const lines = [`Propagated from environments@${shortSha(target)}.`, ""];
   for (const plan of plans) {
@@ -554,13 +593,21 @@ function prBody(target, plans) {
     if (plan.check?.command) lines.push("", `Fast check: \`${plan.check.command}\` — ${plan.check.ok ? "passed" : "FAILED"}.`);
     lines.push("");
   }
-  lines.push(
-    "---",
+  lines.push(...prTrailer(""));
+  return lines.join("\n");
+}
+
+// The bootstrap PR only adds sentinels; the body names each stamped lane and its pin.
+function bootstrapPrBody(target, plans) {
+  const lines = [
+    `Lane sentinels stamped from environments@${shortSha(target)}: the baseline pin each lane's propagation queue starts from.`,
     "",
-    "Opened by `tools/template-propagate.mjs` (one PR per repo; roll back by closing this PR).",
-    "The applier never pushes to the base branch directly.",
-    "",
-  );
+  ];
+  for (const plan of plans) {
+    lines.push(`## ${plan.lane} (${plan.source})`, "");
+    lines.push(`- stamped \`.salgadinhos/${plan.sentinelFile}\` (revision 1, scaffold ${shortSha(target)})`, "");
+  }
+  lines.push(...prTrailer(" --bootstrap"));
   return lines.join("\n");
 }
 
@@ -568,7 +615,7 @@ function prBody(target, plans) {
 // Repo / run orchestration
 // ---------------------------------------------------------------------------
 
-function runRepo({ project, lanes, environmentsPath, codeRoot, target, dryRun, skipCheck, checkTimeoutSeconds, gh, scratchDir, gitEnv }) {
+function runRepo({ project, lanes, environmentsPath, codeRoot, target, dryRun, skipCheck, checkTimeoutSeconds, gh, scratchDir, gitEnv, bootstrap = false }) {
   const report = { project, status: "no-op", originUrl: null, branch: null, base: null, prUrl: null, error: null, lanes: [] };
   const siblingDir = join(codeRoot, project);
   report.originUrl = git(siblingDir, ["remote", "get-url", "origin"], { env: gitEnv }).stdout.trim();
@@ -586,13 +633,15 @@ function runRepo({ project, lanes, environmentsPath, codeRoot, target, dryRun, s
   // A re-run lands on the branch the previous run pushed (the clone carries every remote head),
   // so its sentinels are the ones to plan against: already-applied lanes read as at-target and
   // the push stays a fast-forward instead of being rejected as non-fast-forward.
-  report.branch = `salgadinhos/propagate-${shortSha(target)}`;
+  report.branch = bootstrap ? "salgadinhos/bootstrap-sentinels" : `salgadinhos/propagate-${shortSha(target)}`;
   report.base = originHead(cloneDir, gitEnv);
   const branchExists = git(cloneDir, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${report.branch}`], { env: gitEnv, allowFailure: true }).status === 0;
   if (branchExists) git(cloneDir, ["checkout", "--quiet", "-B", report.branch, `origin/${report.branch}`], { env: gitEnv });
   else git(cloneDir, ["checkout", "--quiet", "-b", report.branch], { env: gitEnv });
 
-  const plans = lanes.map((laneSpec) => planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, projectName: project, gitEnv }));
+  const plans = lanes
+    .map((laneSpec) => planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, projectName: project, gitEnv, bootstrap }))
+    .filter((plan) => plan !== null);
   report.lanes = plans;
   if (plans.every((plan) => plan.pin === target)) {
     if (branchExists && !dryRun) {
@@ -603,7 +652,13 @@ function runRepo({ project, lanes, environmentsPath, codeRoot, target, dryRun, s
     return report;
   }
   for (const plan of plans) {
-    if (plan.pin !== target) updateLaneSentinel(plan, cloneDir, target);
+    if (plan.bootstrapped) {
+      const sentinelPath = join(cloneDir, ".salgadinhos", plan.sentinelFile);
+      mkdirSync(dirname(sentinelPath), { recursive: true });
+      writeFileSync(sentinelPath, sentinelText({ source: plan.source, lane: plan.lane, scaffoldSha: target, note: "bootstrap" }), "utf8");
+    } else {
+      updateLaneSentinel(plan, cloneDir, target);
+    }
   }
 
   let failed = false;
@@ -625,8 +680,8 @@ function runRepo({ project, lanes, environmentsPath, codeRoot, target, dryRun, s
 
   git(cloneDir, ["add", "-A"], { env: gitEnv });
   if (git(cloneDir, ["diff", "--cached", "--name-only"], { env: gitEnv }).stdout.trim() === "") return report;
-  const title = `Propagate scaffold updates (environments@${shortSha(target)})`;
-  const body = prBody(target, plans);
+  const title = bootstrap ? `Bootstrap lane sentinels (environments@${shortSha(target)})` : `Propagate scaffold updates (environments@${shortSha(target)})`;
+  const body = bootstrap ? bootstrapPrBody(target, plans) : prBody(target, plans);
   git(cloneDir, ["commit", "--quiet", "-m", title, "-m", body], { env: gitEnv });
   if (dryRun) {
     report.status = "dry-run";
@@ -653,6 +708,7 @@ export function runPropagate(options = {}) {
     codeRoot,
     target: targetRef = null,
     onlyProject = null,
+    bootstrapLanes = null,
     dryRun = true,
     skipCheck = false,
     checkTimeoutSeconds = null,
@@ -662,20 +718,28 @@ export function runPropagate(options = {}) {
     gitEnv = process.env,
   } = options;
   if (!environmentsPath || !codeRoot) throw new ConfigError("runPropagate needs environmentsPath and codeRoot");
+  if (bootstrapLanes) {
+    if (!onlyProject) throw new ConfigError("--bootstrap needs --project <name>");
+    if (bootstrapLanes.length === 0) throw new ConfigError("--bootstrap needs at least one --lane <dir>=<source>");
+  }
   const target = resolveCommit(environmentsPath, targetRef ?? "HEAD", gitEnv);
-  const discovered = discoverProjects(environmentsPath, codeRoot);
-  const selected = onlyProject ? discovered.filter((lane) => lane.project === onlyProject) : discovered;
   const byProject = new Map();
-  for (const lane of selected) {
-    if (!byProject.has(lane.project)) byProject.set(lane.project, []);
-    byProject.get(lane.project).push({ lane: lane.lane, sentinelFile: basename(lane.sentinelPath) });
+  if (bootstrapLanes) {
+    byProject.set(onlyProject, bootstrapLanes.map(({ dir, source }) => ({ lane: dir, source, sentinelFile: `${sentinelFileName(dir)}.yml` })));
+  } else {
+    const discovered = discoverProjects(environmentsPath, codeRoot);
+    const selected = onlyProject ? discovered.filter((lane) => lane.project === onlyProject) : discovered;
+    for (const lane of selected) {
+      if (!byProject.has(lane.project)) byProject.set(lane.project, []);
+      byProject.get(lane.project).push({ lane: lane.lane, sentinelFile: basename(lane.sentinelPath) });
+    }
   }
 
   const scratchDir = mkdtempSync(join(scratchRoot, "template-propagate-"));
   const repos = [];
   for (const [project, lanes] of byProject) {
     try {
-      repos.push(runRepo({ project, lanes, environmentsPath, codeRoot, target, dryRun, skipCheck, checkTimeoutSeconds, gh, scratchDir, gitEnv }));
+      repos.push(runRepo({ project, lanes, environmentsPath, codeRoot, target, dryRun, skipCheck, checkTimeoutSeconds, gh, scratchDir, gitEnv, bootstrap: bootstrapLanes != null }));
     } catch (error) {
       repos.push({ project, status: "error", originUrl: null, branch: null, base: null, prUrl: null, error: error.message, lanes: [] });
     }
@@ -700,6 +764,10 @@ export function formatRun(result) {
       continue;
     }
     for (const lane of repo.lanes) {
+      if (lane.bootstrapped) {
+        lines.push(`  stamp  .salgadinhos/${lane.sentinelFile} (${lane.source}, revision 1, scaffold ${result.target.short})`);
+        continue;
+      }
       if (lane.pin === result.target.sha) continue;
       lines.push(`  ${lane.lane} (${lane.source}, revision ${lane.revision}):`);
       for (const apply of lane.applies) lines.push(`    apply  ${apply.file} (${apply.class}: ${apply.changes.join(", ")})`);
@@ -728,7 +796,8 @@ export function formatRun(result) {
 
 const USAGE =
   "usage: node tools/template-propagate.mjs [--open-pr] [--dry-run] [--project <name>] [--to <sha>] " +
-  "[--code-root <dir>] [--skip-check] [--keep-scratch] [--check-timeout <seconds>]\n\n" +
+  "[--code-root <dir>] [--skip-check] [--keep-scratch] [--check-timeout <seconds>]\n" +
+  "       node tools/template-propagate.mjs --bootstrap --open-pr --project <name> --lane <dir>=<source> [--lane ...]\n\n" +
   "  --open-pr        push the propagation branch and open one PR per repo (default: dry run)\n" +
   "  --dry-run        apply + fast check in a scratch clone, open nothing\n" +
   "  --to <sha>       scaffold commit to propagate up to (default: this checkout's HEAD)\n" +
@@ -736,10 +805,19 @@ const USAGE =
   "  --code-root <dir>  project family checkout (default: this repo's parent)\n" +
   "  --skip-check     skip the lane fast checks declared in the manifest\n" +
   "  --check-timeout <seconds>  override check.timeout_seconds / the 15 min default\n" +
-  "  --keep-scratch   keep the scratch clones (failures keep them anyway)";
+  "  --keep-scratch   keep the scratch clones (failures keep them anyway)\n" +
+  "  --bootstrap      stamp .salgadinhos/<lane>.yml for a project that has none (one PR per repo;\n" +
+  "                   never touches anything outside .salgadinhos/)\n" +
+  "  --lane <dir>=<source>  a lane to bootstrap (repeatable; needs --bootstrap)";
+
+function parseLaneSpec(value) {
+  const eq = value.indexOf("=");
+  if (eq <= 0 || eq === value.length - 1) return null;
+  return { dir: value.slice(0, eq), source: value.slice(eq + 1) };
+}
 
 function parseArgs(argv) {
-  const args = { codeRoot: null, project: null, to: null, dryRun: true, skipCheck: false, keepScratch: false, checkTimeoutSeconds: null };
+  const args = { codeRoot: null, project: null, to: null, dryRun: true, skipCheck: false, keepScratch: false, checkTimeoutSeconds: null, bootstrap: false, lanes: [] };
   let openPr = false;
   let explicitDryRun = false;
   for (let i = 2; i < argv.length; i++) {
@@ -752,7 +830,15 @@ function parseArgs(argv) {
     else if (flag === "--skip-check") args.skipCheck = true;
     else if (flag === "--keep-scratch") args.keepScratch = true;
     else if (flag === "--check-timeout") args.checkTimeoutSeconds = Number(argv[++i]);
-    else if (flag === "--help" || flag === "-h") {
+    else if (flag === "--bootstrap") args.bootstrap = true;
+    else if (flag === "--lane") {
+      const spec = parseLaneSpec(argv[++i]);
+      if (spec === null) {
+        console.error("[template-propagate] --lane needs <dir>=<source>, e.g. --lane backend=kotlin");
+        process.exit(2);
+      }
+      args.lanes.push(spec);
+    } else if (flag === "--help" || flag === "-h") {
       console.log(USAGE);
       process.exit(0);
     } else {
@@ -769,6 +855,18 @@ function parseArgs(argv) {
     console.error("[template-propagate] --check-timeout needs a positive number of seconds");
     process.exit(2);
   }
+  if (args.lanes.length > 0 && !args.bootstrap) {
+    console.error("[template-propagate] --lane needs --bootstrap");
+    process.exit(2);
+  }
+  if (args.bootstrap && !args.project) {
+    console.error("[template-propagate] --bootstrap needs --project <name>");
+    process.exit(2);
+  }
+  if (args.bootstrap && args.lanes.length === 0) {
+    console.error("[template-propagate] --bootstrap needs at least one --lane <dir>=<source>");
+    process.exit(2);
+  }
   args.dryRun = !openPr;
   return args;
 }
@@ -782,6 +880,7 @@ function main(argv) {
       codeRoot,
       target: args.to,
       onlyProject: args.project,
+      bootstrapLanes: args.bootstrap ? args.lanes : null,
       dryRun: args.dryRun,
       skipCheck: args.skipCheck,
       keepScratch: args.keepScratch,

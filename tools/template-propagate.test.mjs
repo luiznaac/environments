@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 
 import { parseYamlLite } from "./template-check.mjs";
 import {
+  ConfigError,
   Gh,
   applyJsonPins,
   applyTomlCatalog,
@@ -769,4 +770,175 @@ test("runPropagate: a merge entry without sections is a clear repo error", () =>
   assert.equal(result.failures, 1);
   assert.equal(result.repos[0].status, "error");
   assert.match(result.repos[0].error, /merge needs a non-empty 'sections' list/);
+});
+
+// ---------------------------------------------------------------------------
+// Bootstrap: stamping the lane sentinels of a project that has none
+// ---------------------------------------------------------------------------
+
+function bootstrapFixture(base) {
+  const environments = join(base, "environments");
+  writeFiles(environments, {
+    "react/.salgadinhos/manifest.yml": "entries:\n  package.json:\n    class: pinned\n    pins: [react]\ninstantiate:\n  name: template\n",
+    "react/package.json": `${JSON.stringify({ name: "template-fe", dependencies: { react: "^18.2.0" } }, null, 2)}\n`,
+    "kotlin/.salgadinhos/manifest.yml": "entries:\n  gradle/libs.versions.toml:\n    class: pinned\ninstantiate:\n  name: template\n",
+    "kotlin/gradle/libs.versions.toml": "[versions]\nktor = \"3.3.1\"\n",
+  });
+  git(environments, ["init", "-q", "-b", "main"]);
+  git(environments, ["add", "-A"]);
+  git(environments, ["commit", "-qm", "scaffold v1"]);
+  const pin = git(environments, ["rev-parse", "HEAD"]);
+  writeFiles(environments, {
+    "react/package.json": `${JSON.stringify({ name: "template-fe", dependencies: { react: "^19.0.0" } }, null, 2)}\n`,
+  });
+  git(environments, ["add", "-A"]);
+  git(environments, ["commit", "-qm", "scaffold v2"]);
+  const target = git(environments, ["rev-parse", "HEAD"]);
+  return { environments, pin, target };
+}
+
+// A sibling project whose default branch carries no .salgadinhos/ at all.
+function bareProjectFixture(base, { name = "chameidor", files }) {
+  const dir = join(base, name);
+  writeFiles(dir, files);
+  git(dir, ["init", "-q", "-b", "main"]);
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "project"]);
+  const remote = join(base, "remotes", `${name}.git`);
+  mkdirSync(dirname(remote), { recursive: true });
+  git(dirname(remote), ["init", "--bare", "-q", "-b", "main", remote]);
+  git(dir, ["remote", "add", "origin", remote]);
+  git(dir, ["push", "-q", "-u", "origin", "main"]);
+  return { dir, remote };
+}
+
+const BOOTSTRAP_LANES = [
+  { dir: "frontend", source: "react" },
+  { dir: "backend", source: "kotlin" },
+];
+
+function runBootstrap(base, options = {}) {
+  return runPropagate({
+    environmentsPath: join(base, "environments"),
+    codeRoot: base,
+    dryRun: true,
+    bootstrapLanes: BOOTSTRAP_LANES,
+    onlyProject: "chameidor",
+    gitEnv: TEST_ENV,
+    scratchRoot: base,
+    ...options,
+  });
+}
+
+test("runPropagate: bootstrap stamps one sentinel per lane via a single PR, without touching the project", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-bootstrap-"));
+  bootstrapFixture(base);
+  const project = bareProjectFixture(base, {
+    files: {
+      "frontend/package.json": `${JSON.stringify({ name: "chameidor-fe", dependencies: { react: "^18.2.0" } }, null, 2)}\n`,
+      "backend/build.gradle.kts": "plugins {}\n",
+    },
+  });
+  const before = treeSnapshot(project.dir);
+  const gh = fakeGh();
+
+  const dry = runBootstrap(base, { gh });
+  assert.equal(dry.failures, 0);
+  assert.equal(gh.calls.length, 0, "bootstrap dry-run must not talk to gh");
+  assert.deepEqual(treeSnapshot(project.dir), before, "bootstrap dry-run must not write to the project checkout");
+  assert.deepEqual(remoteRefs(project.remote), ["refs/heads/main"], "bootstrap dry-run must not push");
+  assert.equal(dry.repos[0].status, "dry-run");
+
+  const opened = runBootstrap(base, { dryRun: false, gh });
+  assert.equal(opened.failures, 0);
+  const creates = gh.calls.filter((call) => call.method === "createPr");
+  assert.equal(creates.length, 1, "one bootstrap must open exactly one PR");
+  assert.equal(creates[0].spec.repo, "test-org/chameidor");
+  assert.equal(creates[0].spec.base, "main");
+  assert.equal(creates[0].spec.head, "salgadinhos/bootstrap-sentinels");
+  assert.equal(opened.repos[0].status, "pr-opened");
+  assert.deepEqual(treeSnapshot(project.dir), before, "the project checkout must never be touched");
+
+  const inspect = cloneBranch(base, project.remote, "salgadinhos/bootstrap-sentinels", "inspect-bootstrap");
+  const frontend = parseYamlLite(readFileSync(join(inspect, ".salgadinhos/frontend.yml"), "utf8"));
+  assert.equal(frontend.source, "react");
+  assert.equal(frontend.lane, "frontend");
+  assert.equal(frontend.applied.revision, "1");
+  assert.equal(frontend.applied.scaffold_sha, dry.target.sha);
+  assert.deepEqual(frontend.allow, []);
+  const backend = parseYamlLite(readFileSync(join(inspect, ".salgadinhos/backend.yml"), "utf8"));
+  assert.equal(backend.source, "kotlin");
+  assert.equal(backend.applied.scaffold_sha, dry.target.sha);
+  assert.deepEqual(
+    remoteRefs(project.remote).sort(),
+    ["refs/heads/main", "refs/heads/salgadinhos/bootstrap-sentinels"].sort(),
+  );
+});
+
+test("runPropagate: bootstrap honors --to for the pin", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-bootstrap-to-"));
+  const { environments, pin } = bootstrapFixture(base);
+  const project = bareProjectFixture(base, {
+    files: { "frontend/package.json": "{}\n", "backend/build.gradle.kts": "plugins {}\n" },
+  });
+  const gh = fakeGh();
+  const result = runBootstrap(base, { dryRun: false, gh, target: pin });
+  assert.equal(result.failures, 0);
+  assert.equal(result.repos[0].status, "pr-opened");
+  const inspect = cloneBranch(base, project.remote, "salgadinhos/bootstrap-sentinels", "inspect-to");
+  const sentinel = parseYamlLite(readFileSync(join(inspect, ".salgadinhos/frontend.yml"), "utf8"));
+  assert.equal(sentinel.applied.scaffold_sha, pin);
+});
+
+test("runPropagate: a bootstrap re-run over the open PR is a no-op, not a duplicate", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-bootstrap-idem-"));
+  bootstrapFixture(base);
+  const project = bareProjectFixture(base, {
+    files: { "frontend/package.json": "{}\n", "backend/build.gradle.kts": "plugins {}\n" },
+  });
+  const first = runBootstrap(base, { dryRun: false, gh: fakeGh() });
+  assert.equal(first.repos[0].status, "pr-opened");
+  const tip = git(base, ["--git-dir", project.remote, "rev-parse", "refs/heads/salgadinhos/bootstrap-sentinels"]);
+
+  const gh = fakeGh({ existingPr: "https://example.test/test-org/chameidor/pull/7" });
+  const result = runBootstrap(base, { dryRun: false, gh });
+  assert.equal(result.failures, 0);
+  assert.equal(result.repos[0].status, "pr-exists");
+  assert.equal(gh.calls.filter((call) => call.method === "createPr").length, 0);
+  assert.equal(git(base, ["--git-dir", project.remote, "rev-parse", "refs/heads/salgadinhos/bootstrap-sentinels"]), tip, "the branch must not grow a new commit");
+});
+
+test("runPropagate: bootstrap with an unknown scaffold source is a repo error", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-bootstrap-badsource-"));
+  bootstrapFixture(base);
+  const project = bareProjectFixture(base, {
+    files: { "frontend/package.json": "{}\n" },
+  });
+  const result = runBootstrap(base, { dryRun: false, gh: fakeGh(), bootstrapLanes: [{ dir: "backend", source: "ruby" }] });
+  assert.equal(result.failures, 1);
+  assert.equal(result.repos[0].status, "error");
+  assert.match(result.repos[0].error, /manifest missing/);
+  assert.deepEqual(remoteRefs(project.remote), ["refs/heads/main"]);
+});
+
+test("runPropagate: bootstrap rejects a lane directory that is not on the default branch", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-bootstrap-nolane-"));
+  bootstrapFixture(base);
+  const project = bareProjectFixture(base, {
+    files: { "frontend/package.json": "{}\n" },
+  });
+  const result = runBootstrap(base, { dryRun: false, gh: fakeGh(), bootstrapLanes: [{ dir: "backed", source: "kotlin" }] });
+  assert.equal(result.failures, 1);
+  assert.equal(result.repos[0].status, "error");
+  assert.match(result.repos[0].error, /lane 'backed' is not on the default branch/);
+  assert.deepEqual(remoteRefs(project.remote), ["refs/heads/main"]);
+});
+
+test("runPropagate: bootstrap without --project is a config error", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-bootstrap-noproj-"));
+  bootstrapFixture(base);
+  assert.throws(
+    () => runPropagate({ environmentsPath: join(base, "environments"), codeRoot: base, bootstrapLanes: BOOTSTRAP_LANES, dryRun: true, gitEnv: TEST_ENV }),
+    (error) => error instanceof ConfigError && /bootstrap needs --project/.test(error.message),
+  );
 });
