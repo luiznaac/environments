@@ -21,6 +21,7 @@ entries:
 instantiate:
   name: template
   lane: backend
+  # `clean build` includes the Docker-backed integration suite, like CI.
   check: ./gradlew clean build
   keep:
     - config/detekt/config.yml
@@ -38,6 +39,7 @@ instantiate:
         integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/DockerComposeExtension.kt:
           - "show tables' template"
           - 'table" template;'
+          - 'database = "template"'
         integrationTest/src/test/kotlin/dev/agner/template/integrationTest/tests/MigrationSchemaTest.kt:
           - 3306/template
     port:

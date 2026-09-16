@@ -11,6 +11,10 @@ object HealthCheckLogTable : Table("health_check_log") {
     val message = varchar("message", 500).nullable()
 
     override val primaryKey = PrimaryKey(id)
+
+    init {
+        index("ix_health_check_log_checked_at", isUnique = false, checkedAt)
+    }
 }
 
 val allTables = listOf(HealthCheckLogTable)
