@@ -11,7 +11,9 @@ from a given scaffold *next*; they never affect an already-generated project ret
 
 There are four independent scaffolds, `kotlin/`, `python/`, `php/`, and `react/`. They do not
 share code or tooling with each other — treat them as separate repositories that happen to live in
-the same place. `kotlin/` and `python/` deliberately share the *same architecture* (see below), so
+the same place. (The root-level `tools/` reads every scaffold's `.salgadinhos/manifest.yml`, but
+that's the propagation machinery aimed at the scaffolds, not shared scaffold code.) `kotlin/` and
+`python/` deliberately share the *same architecture* (see below), so
 a change to the shape of one should usually be mirrored in the other. `react/` is what every
 project's `frontend/` was generated from — see [react/AGENTS.md](react/AGENTS.md).
 
@@ -130,6 +132,40 @@ generated from — React 19, Vite 6, TypeScript, Tailwind v4, TanStack Query, Re
 detail in [react/AGENTS.md](react/AGENTS.md); unlike the other three scaffolds it ships with
 Biome + Vitest wired up already — see `template-sync` in the `salgadinhos` repo for porting that
 back into the four generated frontends, which don't have it yet.
+
+## Propagation: manifests + template-check
+
+Each scaffold carries `.salgadinhos/manifest.yml` — the classification the propagation flow
+reads. `entries` maps a path (relative to the scaffold root) to one of four classes:
+
+| Class | Meaning | `template-check` behavior |
+|---|---|---|
+| `owned` | The scaffold owns the file; propagation overwrites it | whole-file compare (JSON structurally, text normalized) |
+| `pinned` | Surgical edit — only the pinned bits move | JSON dependency watchlist (`pins`) or every `[versions]` alias of a TOML catalog |
+| `merge` | The project edits it too; only the listed sections merge | named TOML sections compare |
+| `judgment` | Not mechanical — the porting skill handles it | skipped |
+
+`instantiate.name` is the scaffold's own name token (`template`); creation tooling replaces it
+word-boundedly with the project name, and `template-check` reuses it to normalize scaffold files
+against a project. The watchlist is deliberately curated — add an entry only when the project
+family really should converge on it.
+
+Projects are discovered by globbing for `.salgadinhos/<lane>.yml` sentinels (one per lane:
+`source`, `lane`, `applied`, `allow`) — stamped by the creation script / applier, never
+hand-written. `allow: [{ entry, reason }]` is how a lane records an accepted divergence.
+
+`tools/template-check.mjs` is the read-only detector: it compares every discovered lane against
+its scaffold manifest and reports DRIFT (project behind — port the scaffold's improvement),
+AHEAD (project ran ahead — port back or record an `allow`) and RESTATE (a global AGENTS.md rule
+copied verbatim into a project doc). It never applies anything. `--project <name>` narrows the
+run; `--code-root <dir>` points at another checkout of the project family (default: this repo's
+parent); `--global-agents <file>` overrides the salgadinhos global. Exit codes: 0 clean,
+1 blocking drift, 2 config error.
+
+```bash
+node tools/template-check.mjs     # whole family (needs the sibling repos checked out)
+node --test "tools/*.test.mjs"    # the check's own tests
+```
 
 ## Pre-commit
 

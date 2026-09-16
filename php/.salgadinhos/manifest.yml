@@ -1,0 +1,13 @@
+# Propagation manifest for the php scaffold — read by tools/template-check.mjs and, later, by the
+# applier / creation tooling. `entries` classifies each watched path (owned | pinned | merge |
+# judgment) and `instantiate` names the scaffold; the class semantics live in
+# environments/AGENTS.md ("Propagation: manifests + template-check").
+# The php scaffold is a bare toolchain setup with no consumer yet (deferred until one exists),
+# so nothing is mechanically watched and `entries` stays empty until a project classifies it.
+entries: {}
+
+instantiate:
+  # No placeholder token yet: Base.php / BaseTest.php are placeholders to replace, not a name
+  # to rename, and the `Src\` / `Tests\` namespace is replaced wholesale when php gets a
+  # consumer.
+  name: null
