@@ -1,13 +1,12 @@
 # AGENTS.md — Python scaffold
 
 Development guidelines for anyone (human, agent, or tool) working in this scaffold. Follow the
-patterns below rather than inventing new ones — this is a template that gets copied forward, so
-consistency matters more than local cleverness.
+patterns below rather than inventing new ones — consistency matters more than local cleverness.
 
 ## What this is
 
 Not an application. A **starter skeleton** for a Python backend service, deliberately the same
-architecture as the sibling [`kotlin/`](../kotlin) scaffold (which itself is the template behind
+architecture as the sibling [`kotlin/`](../kotlin) scaffold (which itself is the scaffold behind
 [chameidor](../../chameidor/AGENTS.md) and [portfolio-2](../../portfolio-2/AGENTS.md)).
 One vertical slice is implemented end-to-end — a **health check**. Keep it intact and working;
 it's the reference example for "how do I wire a new port/adapter".
@@ -158,8 +157,10 @@ Local dev: `docker compose up -d mysql` (or `uv run poe db`) starts MySQL, then
 
 Git/PR conventions: see `salgadinhos/global/AGENTS.md`.
 
-## Renaming when starting a new project
+## Instantiation
 
-`template` -> `<project>` in: `src/template/` dir, `pyproject.toml` (`name`, hatch `packages`,
-`[tool.importlinter]` `root_package` + `containers`, `[tool.mypy]` `packages`), `Dockerfile`,
-`deploy/entrypoint.sh`, `ci.yml`, `poe` tasks, and `MYSQL_DATABASE` in `docker-compose.yml`.
+New projects are instantiated from this scaffold by the `new-project` script in `environments` —
+it applies the `template` renames (package dir, pyproject, import-linter, Dockerfile, CI, DB
+name) from the manifest's `instantiate:` section, stamps the lane sentinel and makes the first
+commit; the creation skill in `salgadinhos` drives the parameters and the follow-up. Don't rename
+by hand.

@@ -270,11 +270,10 @@ MySQL for full-stack runs.
 
 Git/PR conventions: see `salgadinhos/global/AGENTS.md`.
 
-Renaming when starting a new project:
+## Instantiation
 
-`dev.agner.template` → `dev.agner.<project>` in:
-- `build.gradle.kts` (rootProject.name, package declarations)
-- `settings.gradle.kts`
-- `docker-compose.yml` (database name)
-- `application/src/main/resources/application.yaml` (logging package names)
-- `.run/` configs
+New projects are instantiated from this scaffold by the `new-project` script in `environments` —
+it applies every rename in this file (package, Gradle project, docker-compose database name, run
+configs) from the manifest's `instantiate:` section, stamps the lane sentinel and makes the first
+commit; the creation skill in `salgadinhos` drives the parameters and the follow-up. Don't rename
+by hand.

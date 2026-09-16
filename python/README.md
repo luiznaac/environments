@@ -31,9 +31,8 @@ curl localhost:8080/health
 
 ## Starting a new project from it
 
-Copy the `python/` folder, then rename the `template` package: the directory
-`src/template/`, `packages = ["src/template"]` and `name` in `pyproject.toml`, the
-`root_package` / container names in `[tool.importlinter]`, the module paths in
-`Dockerfile` / `ci.yml` / `poe` tasks, and the `MYSQL_DATABASE` in `docker-compose.yml`.
+New projects are instantiated by the `new-project` script in `environments`, which applies the
+package/pyproject/Dockerfile/database renames from the manifest's `instantiate:` section, stamps
+the lane sentinel and makes the first commit. Don't copy and rename by hand.
 
 See [AGENTS.md](AGENTS.md) for the architecture and the rules for evolving it.

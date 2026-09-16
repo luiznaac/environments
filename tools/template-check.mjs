@@ -296,6 +296,84 @@ function parseFile(path) {
   }
 }
 
+// Every instantiate field is either absent/null or a non-empty string; anything else is a
+// config error (the manifest is data the creation tooling reads, not prose).
+function instantiateString(value, manifestPath, key) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") throw new ConfigError(`${manifestPath}: 'instantiate.${key}' must be a string or null`);
+  return value;
+}
+
+// `instantiate.values` — per-value override targets: map of value name -> { default?, replacements }
+// where `replacements` is a map of scaffold-relative path -> literal strings to swap when the
+// creation tooling is given an override.
+function parseInstantiateValues(raw, manifestPath) {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ConfigError(`${manifestPath}: 'instantiate.values' must be a map`);
+  }
+  const values = {};
+  for (const [key, spec] of Object.entries(raw)) {
+    if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
+      throw new ConfigError(`${manifestPath}: 'instantiate.values.${key}' must be a map`);
+    }
+    const value = {};
+    if (spec.default !== undefined && spec.default !== null && spec.default !== "") {
+      if (typeof spec.default !== "string") {
+        throw new ConfigError(`${manifestPath}: 'instantiate.values.${key}.default' must be a string`);
+      }
+      value.default = spec.default;
+    }
+    if (spec.style !== undefined && spec.style !== null) {
+      if (spec.style !== "token" && spec.style !== "whole") {
+        throw new ConfigError(`${manifestPath}: 'instantiate.values.${key}.style' must be 'token' or 'whole'`);
+      }
+      value.style = spec.style;
+    }
+    const replacements = spec.replacements;
+    if (replacements === undefined || replacements === null) {
+      throw new ConfigError(`${manifestPath}: 'instantiate.values.${key}' needs 'replacements'`);
+    }
+    if (typeof replacements !== "object" || Array.isArray(replacements)) {
+      throw new ConfigError(`${manifestPath}: 'instantiate.values.${key}.replacements' must be a map`);
+    }
+    if (Object.keys(replacements).length === 0) {
+      throw new ConfigError(`${manifestPath}: 'instantiate.values.${key}' needs 'replacements'`);
+    }
+    value.replacements = {};
+    for (const [file, literals] of Object.entries(replacements)) {
+      if (!Array.isArray(literals) || literals.some((literal) => typeof literal !== "string" || literal === "")) {
+        throw new ConfigError(`${manifestPath}: 'instantiate.values.${key}.replacements.${file}' must be a list of strings`);
+      }
+      value.replacements[file] = literals;
+    }
+    values[key] = value;
+  }
+  return values;
+}
+
+function parseInstantiate(raw, manifestPath) {
+  const source = raw ?? {};
+  if (typeof source !== "object" || Array.isArray(source)) {
+    throw new ConfigError(`${manifestPath}: 'instantiate' must be a map`);
+  }
+  let keep = [];
+  if (source.keep !== undefined && source.keep !== null) {
+    if (!Array.isArray(source.keep)) throw new ConfigError(`${manifestPath}: 'instantiate.keep' must be a list`);
+    if (source.keep.some((item) => typeof item !== "string" || item === "")) {
+      throw new ConfigError(`${manifestPath}: 'instantiate.keep' must be a list of strings`);
+    }
+    keep = source.keep;
+  }
+  return {
+    name: instantiateString(source.name, manifestPath, "name"),
+    lane: instantiateString(source.lane, manifestPath, "lane"),
+    check: instantiateString(source.check, manifestPath, "check"),
+    keep,
+    values: parseInstantiateValues(source.values, manifestPath),
+  };
+}
+
 export function loadManifest(manifestPath) {
   if (!existsSync(manifestPath)) throw new ConfigError(`manifest missing: ${manifestPath}`);
   const parsed = parseFile(manifestPath);
@@ -317,7 +395,6 @@ export function loadManifest(manifestPath) {
     }
     entries[file] = entry;
   }
-  const name = parsed?.instantiate?.name;
   const rawCheck = parsed?.check;
   const check = { command: null, timeoutSeconds: null };
   if (rawCheck != null) {
@@ -336,7 +413,7 @@ export function loadManifest(manifestPath) {
       check.timeoutSeconds = seconds;
     }
   }
-  return { entries, instantiate: { name: typeof name === "string" && name !== "" ? name : null }, check };
+  return { entries, instantiate: parseInstantiate(parsed?.instantiate, manifestPath), check };
 }
 
 export function loadSentinel(sentinelPath) {
