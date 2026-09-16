@@ -16,5 +16,39 @@ entries:
 # the project name (covers `src/template/`, pyproject `name`/`packages`/`root_package`, the
 # uvicorn target, Dockerfile and CI). template-check reuses it to normalize scaffold files
 # against a project.
+#
+# `instantiate` is also the creation contract read by tools/new-project.mjs: the lane dir, the
+# fast check, the files where the token is legitimately part of the scaffold (not a placeholder),
+# and the convention values with their per-file literals for CLI overrides.
 instantiate:
   name: template
+  lane: backend
+  check: uv run poe check
+  values:
+    db:
+      replacements:
+        docker-compose.yml:
+          - MYSQL_DATABASE=template
+        .env.example:
+          - MYSQL__DATABASE=template
+        mysql/init.sql:
+          - USE template;
+        src/template/application/settings.py:
+          - 'database: str = "template"'
+    port:
+      default: "8080"
+      replacements:
+        .env.example:
+          - "8080"
+        Dockerfile:
+          - "8080"
+        pyproject.toml:
+          - --port 8080
+        src/template/application/settings.py:
+          - "8080"
+    image:
+      # The override is the complete image reference (`luiznaac/<project>-python`).
+      style: whole
+      replacements:
+        .github/workflows/docker-publish.yml:
+          - luiznaac/template-python

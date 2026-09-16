@@ -13,5 +13,43 @@ entries:
 # Word-boundary token the scaffold uses as its own name; the creation tooling replaces it with
 # the project name (covers `dev.agner.template`, `rootProject.name` and the docker-compose
 # database name). template-check reuses it to normalize scaffold files against a project.
+#
+# `instantiate` is also the creation contract read by tools/new-project.mjs: the lane dir, the
+# fast check, the files where the token is legitimately part of the scaffold (not a placeholder),
+# and the convention values with their per-file literals for CLI overrides. The token pass
+# handles the rest: package names, `rootProject.name`, the DB name and the image.
 instantiate:
   name: template
+  lane: backend
+  check: ./gradlew clean build
+  keep:
+    - config/detekt/config.yml
+    - gradlew
+    - gradlew.bat
+  values:
+    db:
+      replacements:
+        docker-compose.yml:
+          - MYSQL_DATABASE=template
+        persistence/src/main/kotlin/dev/agner/template/persistence/configuration/DatabaseConfig.kt:
+          - 3306/template
+        persistence/src/main/kotlin/dev/agner/template/persistence/migration/Migrator.kt:
+          - '?: "template"'
+        integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/DockerComposeExtension.kt:
+          - "show tables' template"
+          - 'table" template;'
+        integrationTest/src/test/kotlin/dev/agner/template/integrationTest/tests/MigrationSchemaTest.kt:
+          - 3306/template
+    port:
+      default: "8080"
+      replacements:
+        application/src/main/resources/application.yaml:
+          - "8080"
+        integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/HttpRequestService.kt:
+          - "8080"
+    image:
+      # The override is the complete image reference (`luiznaac/<project>`).
+      style: whole
+      replacements:
+        .github/workflows/docker-publish.yml:
+          - luiznaac/template
