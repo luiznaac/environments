@@ -230,9 +230,11 @@ not armed — it never fails a push on its own findings.
 
 **Advisory.** `tools/sweep-advisory.mjs` renders a sticky, non-blocking comment on every open PR
 of a family repo whose lane has a queue (created once, patched in place, matched by the
-`<!-- template-sweep advisory -->` marker; never posted when a lane is at its pin). The comment
-lists the mechanical queue with the exact applier command, flags judgment entries for the porting
-skill, shows waivers (renúncia) and unclassified changes, and states that it never gates a merge.
+`<!-- template-sweep advisory -->` marker; never posted when a lane is at its pin, and patched
+to a "current" body when a queue drains). The comment lists the mechanical queue with the exact
+applier command, flags judgment entries for the porting skill, shows waivers (renúncia) and
+unclassified changes, and states that it never gates a merge. The sweep's own propagation PRs
+(`salgadinhos/propagate-*`) are skipped — their body already is the queue.
 
 ```bash
 node tools/sweep-advisory.mjs --collect --code-root .. --output sweep-collect.json

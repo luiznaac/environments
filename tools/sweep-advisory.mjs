@@ -48,8 +48,8 @@ const PIN_UNRESOLVABLE = "pin not resolvable in this checkout — scaffold histo
 // Small git plumbing (read-only)
 // ---------------------------------------------------------------------------
 
-function git(cwd, args, { allowFailure = false } = {}) {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+function git(cwd, args, { allowFailure = false, env = process.env } = {}) {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8", env, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
   if (!allowFailure && result.status !== 0) {
     throw new ConfigError(`git ${args.join(" ")} failed in ${cwd}: ${(result.stderr || "").trim()}`);
   }
@@ -121,6 +121,23 @@ export function classifyFiles(files, { manifest, allow = [] }) {
 
 function pluralCommits(behind) {
   return `${behind} commit${behind === 1 ? "" : "s"}`;
+}
+
+// A queue that drained since the last advisory: patched in place so a stale "N commits behind"
+// never lingers on an open PR. Same marker, minimal body.
+export function renderCurrent(result, project) {
+  const repoLabel = result.sweepRepo ?? "environments";
+  return [
+    ADVISORY_MARKER,
+    "",
+    `## Scaffold propagation advisory — ${project.project}`,
+    "",
+    `Target \`${repoLabel}@${result.short}\` · ${result.week} · all lanes at their pin — nothing queued.`,
+    "",
+    "---",
+    "advisory only — merging is not blocked. Opened/updated by the weekly template sweep.",
+    "",
+  ].join("\n");
 }
 
 // The sticky advisory comment for one project (repo = project.project on GitHub).
@@ -337,14 +354,18 @@ export class SweepGh {
   }
 
   ensureLabel(repo, label) {
-    const result = spawnSync(
-      "gh",
-      ["label", "create", label, "--repo", repo, "--color", "1d76db", "--description", "Weekly template-sweep work order for the template-sync porting skill", "--force"],
-      { encoding: "utf8", windowsHide: true },
-    );
-    if (result.status !== 0 && !/already exists/i.test(result.stderr ?? "")) {
-      throw new ConfigError(`gh label create failed (exit ${result.status}): ${(result.stderr || "").trim()}`);
-    }
+    this.run([
+      "label",
+      "create",
+      label,
+      "--repo",
+      repo,
+      "--color",
+      "1d76db",
+      "--description",
+      "Weekly template-sweep work order for the template-sync porting skill",
+      "--force",
+    ]);
   }
 }
 
@@ -352,16 +373,20 @@ export function runApply(result, { gh = new SweepGh(), openIssue = false } = {})
   const created = [];
   const updated = [];
   for (const project of result.projects) {
-    if (!project.commentBody || !project.repo) continue;
+    if (!project.repo) continue;
     const prs = gh.listOpenPrs(project.repo).filter((pr) => !pr.headRefName.startsWith("salgadinhos/"));
     for (const pr of prs) {
       const sticky = gh.prComments(project.repo, pr.number).find((comment) => comment.body.includes(ADVISORY_MARKER));
       if (!sticky) {
+        if (!project.commentBody) continue;
         gh.createPrComment(project.repo, pr.number, project.commentBody);
         created.push({ repo: project.repo, number: pr.number });
-      } else if (sticky.body !== project.commentBody) {
-        gh.updatePrComment(project.repo, sticky.id, project.commentBody);
-        updated.push({ repo: project.repo, number: pr.number });
+      } else {
+        const body = project.commentBody ?? renderCurrent(result, project);
+        if (sticky.body !== body) {
+          gh.updatePrComment(project.repo, sticky.id, body);
+          updated.push({ repo: project.repo, number: pr.number });
+        }
       }
     }
   }

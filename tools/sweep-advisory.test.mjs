@@ -10,6 +10,7 @@ import {
   isoWeekOf,
   parseCollect,
   renderAdvisory,
+  renderCurrent,
   renderJudgmentIssue,
   runApply,
   runCollect,
@@ -22,8 +23,16 @@ import {
 
 const NOW = new Date("2026-09-16T12:00:00Z");
 
+const TEST_ENV = {
+  ...process.env,
+  GIT_AUTHOR_NAME: "sweep-test",
+  GIT_AUTHOR_EMAIL: "sweep-test@example.com",
+  GIT_COMMITTER_NAME: "sweep-test",
+  GIT_COMMITTER_EMAIL: "sweep-test@example.com",
+};
+
 function git(cwd, args) {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true });
+  const result = spawnSync("git", args, { cwd, encoding: "utf8", env: TEST_ENV, windowsHide: true });
   assert.equal(result.status, 0, `git ${args.join(" ")} failed: ${result.stderr}`);
   return result.stdout.trim();
 }
@@ -413,6 +422,44 @@ test("runApply: patches the sticky comment when the queue moves", () => {
     const second = runApply(moved, { gh });
     assert.deepEqual(second.comments.created, []);
     assert.deepEqual(second.comments.updated, [{ repo: "luiznaac/chameidor", number: 7 }]);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("runApply: a drained queue patches the sticky comment to 'current'", () => {
+  const base = mkdtempSync(join(tmpdir(), "sweep-advisory-drained-"));
+  try {
+    const gh = fakeGh({
+      prs: {
+        "luiznaac/chameidor": [
+          { number: 7, headRefName: "feature", title: "Feature", _comments: [{ id: 101, body: "<!-- template-sweep advisory -->\nold stale advisory" }] },
+        ],
+      },
+    });
+    const result = {
+      target: "abc1234".padEnd(40, "0"),
+      short: "abc1234",
+      week: "2026-W38",
+      sweepRepo: "luiznaac/environments",
+      projects: [
+        {
+          project: "chameidor",
+          repo: "luiznaac/chameidor",
+          commentBody: null,
+          lanes: [{ lane: "frontend", source: "react", behind: 0, stale: null, queue: { applies: [], judgment: [], unclassified: [], waived: [] } }],
+        },
+      ],
+      judgment: null,
+    };
+    const applied = runApply(result, { gh });
+    assert.deepEqual(applied.comments.created, []);
+    assert.deepEqual(applied.comments.updated, [{ repo: "luiznaac/chameidor", number: 7 }]);
+    const comment = gh.prComments("luiznaac/chameidor", 7).find((comment) => comment.id === 101);
+    assert.ok(comment.body.includes("<!-- template-sweep advisory -->"));
+    assert.match(comment.body, /all lanes at their pin — nothing queued/);
+    const clean = renderCurrent(result, result.projects[0]);
+    assert.equal(comment.body, clean);
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
