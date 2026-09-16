@@ -68,9 +68,9 @@ application  →  http-api  →  usecase  ←  persistence
   `gradle/libs.versions.toml` define the versions/rules new projects inherit. If you bump a
   version or a lint rule here, consider (don't automatically do) also porting it to chameidor and
   portfolio-2 — they may have already diverged intentionally.
-- When starting a new project from this template: copy the whole `kotlin/` tree, rename the
-  package (`dev.agner.template` → `dev.agner.<project>`), rename the Gradle project in
-  `settings.gradle.kts`, and update `docker-compose.yml`'s database name.
+- **New projects come from `tools/new-project.mjs`, not from hand-copying.** It applies the
+  package/Gradle/database renames declared in `.salgadinhos/manifest.yml` (`instantiate:`) — see
+  "Creation" under Propagation.
 
 ## `python/` — the FastAPI hexagonal template
 
@@ -164,8 +164,34 @@ parent); `--global-agents <file>` overrides the salgadinhos global. Exit codes: 
 
 ```bash
 node tools/template-check.mjs     # whole family (needs the sibling repos checked out)
-node --test "tools/*.test.mjs"    # the check's own tests
+node --test "tools/*.test.mjs"    # the check's and the creation tooling's tests
 ```
+
+### Creation
+
+`tools/new-project.mjs` instantiates a scaffold into a new project lane:
+
+```bash
+node tools/new-project.mjs --stack kotlin --name <project> [--lane backend] [--to <dir>]
+    [--db <name>] [--port <n>] [--image <repo/name>] [--base-path </p/>] [--code-root <dir>]
+```
+
+It copies the scaffold (manifest included), applies `instantiate:` — the token renamed
+word-boundedly in paths and text and package-name-shapedly in JSON values, plus the value
+overrides — rewrites the copied manifest to `entries` only, stamps the lane sentinel
+(`applied: { revision: 1, scaffold_sha }`), runs the zero-leftover assertion and the scaffold's
+`check`, then `git init`s, commits and installs the master guard
+(`salgadinhos/adapters/install.mjs --install-repo`) — in that order, so the guard never blocks the
+first commit. A red assertion or check aborts before the commit. `--skip-check`/`--skip-guard`
+exist for tests; remote repo, CI, secrets, domain and first deploy are the creation skill's job
+(`salgadinhos`).
+
+`instantiate:` is the creation contract: `name` (token), `lane` (default lane dir), `check` (fast
+check), `keep` (files where the token is not a placeholder) and `values` (conventions — `db`,
+`port`, `image`, `basePath` — each declaring the per-file literals a CLI override swaps; a
+literal's token becomes the override, or its `style: whole` makes the override the literal's full
+replacement, as the image reference needs). `php` declares no `instantiate.name`, so creation
+refuses it until a consumer exists.
 
 ## Pre-commit
 
