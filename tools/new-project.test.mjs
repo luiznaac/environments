@@ -11,6 +11,7 @@ import {
   applyValueOverrides,
   findTokenLeftovers,
   replaceJsonTokenValues,
+  resolveCheckCommand,
   rewriteProjectManifest,
   sentinelText,
 } from "./new-project.mjs";
@@ -166,6 +167,13 @@ test("replaceJsonTokenValues: reports when nothing changed", () => {
   const input = { dependencies: { react: "^19.0.0" } };
   const { changed } = replaceJsonTokenValues(input, "template", "widget");
   assert.equal(changed, false);
+});
+
+test("resolveCheckCommand: Windows runs ./gradlew through PATHEXT, POSIX keeps it", () => {
+  assert.equal(resolveCheckCommand("./gradlew clean build", "win32"), "gradlew clean build");
+  assert.equal(resolveCheckCommand("cd x && ./gradlew test", "win32"), "cd x && gradlew test");
+  assert.equal(resolveCheckCommand("./gradlew clean build", "linux"), "./gradlew clean build");
+  assert.equal(resolveCheckCommand("uv run poe check", "win32"), "uv run poe check");
 });
 
 test("findTokenLeftovers: word hits in text, package metadata in JSON, keeps are exempt", () => {
@@ -465,6 +473,16 @@ test("cli: a host-port collision with a sibling app is refused unless --port ove
   const chosen = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--port", "9000"]));
   assert.equal(chosen.status, 0, chosen.stderr);
   assert.equal(readFileSync(join(fix.root, "widget", "backend", "port.txt"), "utf8"), "port 9000\n");
+});
+
+test("cli: a lane compose with a long-form published port is a collision too", () => {
+  const fix = miniCodeRoot();
+  const lane = join(fix.root, "mono", "backend");
+  mkdirSync(lane, { recursive: true });
+  writeFileSync(join(lane, "docker-compose.yml"), 'services:\n  db:\n    ports:\n      - published: "8080"\n');
+  const refused = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"]));
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /mono/);
 });
 
 test("cli: installs the master guard through salgadinhos' installer after the commit", () => {

@@ -211,7 +211,11 @@ export function sentinelText({ source, lane, scaffoldSha, revision = 1 }) {
 // Creation
 // ---------------------------------------------------------------------------
 
-const VALUE_FLAGS = { db: "--db", port: "--port", image: "--image", basePath: "--base-path" };
+// cmd.exe has no `./`: on Windows a `./gradlew ...` check runs through PATHEXT (`gradlew` ->
+// gradlew.bat), which is the wrapper the stack actually ships there.
+export function resolveCheckCommand(check, platform = process.platform) {
+  return platform === "win32" ? check.replace(/(^|\s)\.\//g, "$1") : check;
+}
 
 // Text is copied LF-canonical: the repos store LF and a Windows checkout smudges it to CRLF,
 // which the stacks' formatters (Biome, Detekt) reject. Batch files keep their ending — cmd.exe
@@ -221,7 +225,7 @@ const KEEP_EOL = /\.bat$/i;
 function copyTree(src, dest) {
   mkdirSync(dest, { recursive: true });
   for (const entry of readdirSync(src, { withFileTypes: true })) {
-    if (entry.name === ".git" || SKIP_DIRS.has(entry.name)) continue;
+    if (SKIP_DIRS.has(entry.name)) continue;
     const from = join(src, entry.name);
     const to = join(dest, entry.name);
     if (entry.isDirectory()) {
@@ -235,7 +239,7 @@ function copyTree(src, dest) {
   }
 }
 
-// Post-order so a renamed directory is not walked through its old path.
+// Rename each entry before recursing, so children are addressed through their new path.
 function renameTokenPaths(dir, token, name) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const from = join(dir, entry.name);
@@ -288,16 +292,30 @@ function requireGit(result, what) {
   }
 }
 
-// A host port published by a sibling project's root compose would collide with the new app.
+// A host port published by a sibling app collides with the new app. Scans the sibling's root
+// compose and its lane composes, short (`- 8080:8080`) and long (`published: 8080`) forms.
 function findPortCollisions(codeRoot, port, projectRoot) {
-  const published = new RegExp(`^\\s*-\\s*["']?${escapeRegex(port)}:`, "m");
+  const short = new RegExp(`^\\s*-\\s*["']?${escapeRegex(port)}:`, "m");
+  const published = new RegExp(`^\\s*(-\\s*)?published:\\s*["']?${escapeRegex(port)}["']?\\s*$`, "m");
   const hits = [];
   for (const entry of readdirSync(codeRoot, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "environments" || entry.name === "salgadinhos") continue;
     const sibling = join(codeRoot, entry.name);
     if (resolve(sibling) === resolve(projectRoot)) continue;
-    const compose = join(sibling, "docker-compose.yml");
-    if (existsSync(compose) && published.test(readFileSync(compose, "utf8"))) hits.push(entry.name);
+    const composes = [join(sibling, "docker-compose.yml")];
+    for (const child of readdirSync(sibling, { withFileTypes: true })) {
+      if (child.isDirectory() && !child.name.startsWith(".") && !SKIP_DIRS.has(child.name)) {
+        composes.push(join(sibling, child.name, "docker-compose.yml"));
+      }
+    }
+    for (const compose of composes) {
+      if (!existsSync(compose)) continue;
+      const text = readFileSync(compose, "utf8");
+      if (short.test(text) || published.test(text)) {
+        hits.push(entry.name);
+        break;
+      }
+    }
   }
   return hits.sort();
 }
@@ -341,16 +359,16 @@ export function createProject({
     throw new ConfigError(`--port must be a number, got '${overrides.port}'`);
   }
 
-  const probe = overrides.port ?? values.port?.default;
+  const effectivePort = overrides.port ?? values.port?.default;
   const projectRoot = resolve(to ?? join(codeRoot, name));
-  if (values.port && probe) {
-    const collisions = findPortCollisions(codeRoot, probe, projectRoot);
+  if (values.port && effectivePort) {
+    const collisions = findPortCollisions(codeRoot, effectivePort, projectRoot);
     if (collisions.length > 0 && overrides.port === undefined) {
       throw new ConfigError(
-        `port ${probe} is already published by ${collisions.join(", ")} — pass ${VALUE_FLAGS.port} <n> to pick another one`,
+        `port ${effectivePort} is already published by ${collisions.join(", ")} — pass --port <n> to pick another one`,
       );
     }
-    if (collisions.length > 0) log(`[new-project] note: port ${probe} is also published by ${collisions.join(", ")}`);
+    if (collisions.length > 0) log(`[new-project] note: port ${effectivePort} is also published by ${collisions.join(", ")}`);
   }
 
   if (existsSync(projectRoot) && readdirSync(projectRoot).length > 0 && !force) {
@@ -381,8 +399,9 @@ export function createProject({
   }
 
   if (check && !skipCheck) {
-    const result = spawnSync(check, { cwd: laneAbs, shell: true, stdio: "inherit" });
-    if (result.error || result.status !== 0) throw new CreationError(`fast check failed: ${check}\n  (left for inspection at ${projectRoot})`);
+    const command = resolveCheckCommand(check);
+    const result = spawnSync(command, { cwd: laneAbs, shell: true, stdio: "inherit" });
+    if (result.error || result.status !== 0) throw new CreationError(`fast check failed: ${command}\n  (left for inspection at ${projectRoot})`);
   }
 
   requireGit(git(["init", "-q", "-b", "master"], projectRoot), "git init");
