@@ -275,7 +275,8 @@ function rewriteTokenContents(rootDir, { token, name, keep }) {
   }
 }
 
-const sentinelFileName = (lane) => (lane === "." ? "root" : lane.split(/[\\/]/).filter(Boolean).join("-"));
+// The sentinel file a lane is named after (`backend` -> `backend.yml`, a root lane -> `root.yml`).
+export const sentinelFileName = (lane) => (lane === "." ? "root" : lane.split(/[\\/]/).filter(Boolean).join("-"));
 
 function git(args, cwd) {
   return spawnSync("git", args, { cwd, encoding: "utf8" });

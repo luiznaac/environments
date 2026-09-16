@@ -879,7 +879,7 @@ test("runPropagate: bootstrap honors --to for the pin", () => {
   const base = mkdtempSync(join(tmpdir(), "template-propagate-bootstrap-to-"));
   const { environments, pin } = bootstrapFixture(base);
   const project = bareProjectFixture(base, {
-    files: { "frontend/package.json": "{}\n" },
+    files: { "frontend/package.json": "{}\n", "backend/build.gradle.kts": "plugins {}\n" },
   });
   const gh = fakeGh();
   const result = runBootstrap(base, { dryRun: false, gh, target: pin });
@@ -894,7 +894,7 @@ test("runPropagate: a bootstrap re-run over the open PR is a no-op, not a duplic
   const base = mkdtempSync(join(tmpdir(), "template-propagate-bootstrap-idem-"));
   bootstrapFixture(base);
   const project = bareProjectFixture(base, {
-    files: { "frontend/package.json": "{}\n" },
+    files: { "frontend/package.json": "{}\n", "backend/build.gradle.kts": "plugins {}\n" },
   });
   const first = runBootstrap(base, { dryRun: false, gh: fakeGh() });
   assert.equal(first.repos[0].status, "pr-opened");
@@ -918,6 +918,19 @@ test("runPropagate: bootstrap with an unknown scaffold source is a repo error", 
   assert.equal(result.failures, 1);
   assert.equal(result.repos[0].status, "error");
   assert.match(result.repos[0].error, /manifest missing/);
+  assert.deepEqual(remoteRefs(project.remote), ["refs/heads/main"]);
+});
+
+test("runPropagate: bootstrap rejects a lane directory that is not on the default branch", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-bootstrap-nolane-"));
+  bootstrapFixture(base);
+  const project = bareProjectFixture(base, {
+    files: { "frontend/package.json": "{}\n" },
+  });
+  const result = runBootstrap(base, { dryRun: false, gh: fakeGh(), bootstrapLanes: [{ dir: "backed", source: "kotlin" }] });
+  assert.equal(result.failures, 1);
+  assert.equal(result.repos[0].status, "error");
+  assert.match(result.repos[0].error, /lane 'backed' is not on the default branch/);
   assert.deepEqual(remoteRefs(project.remote), ["refs/heads/main"]);
 });
 

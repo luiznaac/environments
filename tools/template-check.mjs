@@ -2,8 +2,8 @@
 // Template drift check: reads each project's `.salgadinhos/<lane>.yml` sentinel and compares the
 // lane against its scaffold (`source` in the sentinel; manifest from this checkout). Detection
 // has two views, both computed at each manifest entry's declared granularity:
-//   - queue:  the scaffold at the applied pin vs the scaffold now — what the applier would bring
-//             to the lane (DRIFT, blocking unless `allow`ed).
+//   - queue:  the scaffold at the applied pin vs the scaffold at HEAD — what the applier would
+//             bring to the lane (DRIFT, blocking unless `allow`ed); commits, not the working tree.
 //   - lane:   the lane's files vs the scaffold at the applied pin — edits the lane made on its
 //             own since it applied the pin (AHEAD, report-only: port back or declare an `allow`).
 // Plus a restatement check: a normative line of salgadinhos/global/AGENTS.md must not appear
@@ -516,9 +516,10 @@ const json = (value) => JSON.stringify(value);
 // One directional comparison at the entry's granularity. `left` is the reference side (the
 // applied pin), `right` the moving side (scaffold head, or the lane). Messages say which view
 // they belong to: the queue view keeps the DRIFT phrasing, the lane view appends LANE_SUFFIX.
+const viewLabels = (view) => (view === "lane" ? { side: "lane", suffix: LANE_SUFFIX } : { side: "scaffold", suffix: "" });
+
 function compareOwned(entry, view, left, right, emit) {
-  const side = view === "lane" ? "lane" : "scaffold";
-  const suffix = view === "lane" ? LANE_SUFFIX : "";
+  const { side, suffix } = viewLabels(view);
   if (left == null && right != null) return emit(`${side} added this file since the applied pin${suffix}`);
   if (left != null && right == null) {
     return emit(view === "lane" ? `lane removed this file since the applied pin${LANE_SUFFIX}` : `scaffold dropped this file since the applied pin`);
@@ -550,8 +551,7 @@ function compareOwned(entry, view, left, right, emit) {
 // Direction-aware comparison of two key -> value maps (dependency pins, version aliases) at the
 // view's granularity. `labelOf` renders the key in the message.
 function comparePinned(view, left, right, labelOf, emit) {
-  const side = view === "lane" ? "lane" : "scaffold";
-  const suffix = view === "lane" ? LANE_SUFFIX : "";
+  const { side, suffix } = viewLabels(view);
   for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
     const inLeft = left[key];
     const inRight = right[key];
@@ -568,8 +568,7 @@ function sectionDiff(leftLines, rightLines) {
 }
 
 function compareMerge(view, leftSections, rightSections, sections, emit) {
-  const side = view === "lane" ? "lane" : "scaffold";
-  const suffix = view === "lane" ? LANE_SUFFIX : "";
+  const { side, suffix } = viewLabels(view);
   for (const section of sections) {
     const inLeft = leftSections[section];
     const inRight = rightSections[section];
@@ -640,10 +639,10 @@ function compareEntryViews(ctx, entry, { pin, head, project }) {
 
 function runEntry(ctx, entry, manifestPath) {
   if (entry.class === "judgment") return;
-  if (!existsSync(ctx.scaffoldFile)) {
+  const head = ctx.readAtHead(entry.file);
+  if (head == null && !existsSync(ctx.scaffoldFile)) {
     throw new ConfigError(`scaffold file missing: ${ctx.scaffoldFile} (fix ${manifestPath})`);
   }
-  const head = readFileSync(ctx.scaffoldFile, "utf8");
   const pin = ctx.readAtPin(entry.file);
   const project = existsSync(ctx.projectFile) ? readFileSync(ctx.projectFile, "utf8") : null;
   const { queue, lane } = compareEntryViews(ctx, entry, { pin, head, project });
@@ -693,7 +692,7 @@ function checkRestatements({ codeRoot, project, findings, allow, globalAgentsMd 
 // Runner
 // ---------------------------------------------------------------------------
 
-export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProject = null, gitEnv = process.env }) {
+export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProject = null }) {
   const findings = [];
   let projects = discoverProjects(environmentsPath, codeRoot);
   if (onlyProject) projects = projects.filter((project) => project.project === onlyProject);
@@ -707,26 +706,25 @@ export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProj
     return manifestCache.get(source);
   };
 
-  // The pin side of both views: the scaffold content at the commit the sentinel applied, read
-  // from the environments checkout's history.
-  const pinCache = new Map();
+  // The scaffold sides of both views come from the environments checkout's history: the pin is
+  // the commit the sentinel applied, the head is the commit the applier drains (not the working
+  // tree, so uncommitted scaffold edits cannot read as an un-drainable queue).
   const showCache = new Map();
-  const gitShow = (args) => spawnSync("git", args, { cwd: environmentsPath, encoding: "utf8", env: gitEnv, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
-  const pinReader = {
-    resolve(pin) {
-      if (!pinCache.has(pin)) {
-        const result = gitShow(["rev-parse", "--verify", `${pin}^{commit}`]);
-        if (result.status !== 0) {
-          throw new ConfigError(`cannot resolve the applied pin '${pin}' in ${environmentsPath} (scaffold history rewritten?)`);
-        }
-        pinCache.set(pin, result.stdout.trim());
+  const validatedPins = new Set();
+  const gitShow = (args) => spawnSync("git", args, { cwd: environmentsPath, encoding: "utf8", env: process.env, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+  const scaffoldAt = {
+    validate(pin) {
+      if (validatedPins.has(pin)) return;
+      const result = gitShow(["rev-parse", "--verify", `${pin}^{commit}`]);
+      if (result.status !== 0) {
+        throw new ConfigError(`cannot resolve the applied pin '${pin}' in ${environmentsPath} (scaffold history rewritten?)`);
       }
-      return pinCache.get(pin);
+      validatedPins.add(pin);
     },
-    show(pin, rel) {
-      const key = `${pin}:${rel}`;
+    show(ref, rel) {
+      const key = `${ref}:${rel}`;
       if (!showCache.has(key)) {
-        const result = gitShow(["show", `${pin}:${rel}`]);
+        const result = gitShow(["show", `${ref}:${rel}`]);
         showCache.set(key, result.status === 0 ? result.stdout : null);
       }
       return showCache.get(key);
@@ -745,7 +743,7 @@ export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProj
     if (!pin) {
       throw new ConfigError(`sentinel ${lane.sentinelPath}: detection needs applied.scaffold_sha (the applier stamps it)`);
     }
-    pinReader.resolve(pin);
+    scaffoldAt.validate(pin);
     for (const entry of Object.values(manifest.entries)) {
       runEntry(
         {
@@ -756,7 +754,8 @@ export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProj
           projectFile: join(codeRoot, lane.project, lane.lane, entry.file),
           placeholder: manifest.instantiate.name,
           isAllowed: (file) => lane.allow.some((item) => item.entry === file),
-          readAtPin: (file) => pinReader.show(pin, `${lane.source}/${file}`),
+          readAtPin: (file) => scaffoldAt.show(pin, `${lane.source}/${file}`),
+          readAtHead: (file) => scaffoldAt.show("HEAD", `${lane.source}/${file}`),
           findings,
         },
         entry,

@@ -162,8 +162,9 @@ hand-written (for a project that predates the tooling, the applier's `--bootstra
 `tools/template-check.mjs` is the read-only detector: every discovered lane is compared against
 its scaffold manifest in **two views**, both anchored at the pin (`applied.scaffold_sha`):
 
-- **queue** (the scaffold at the pin vs the scaffold now): what the applier would bring to the
-  lane. Reported as DRIFT — blocking unless the entry is `allow`ed.
+- **queue** (the scaffold at the pin vs the scaffold at `HEAD`): what the applier would bring to
+  the lane. Reads commits, not the working tree — commit a scaffold change to queue it. Reported
+  as DRIFT — blocking unless the entry is `allow`ed.
 - **lane** (the lane vs the scaffold at the pin): the edits the lane made on its own since it
   applied the pin. Reported as AHEAD, report-only: port back, or declare the divergence in
   `allow`.
@@ -215,7 +216,8 @@ node --test "tools/*.test.mjs"      # the check's, the creation tooling's and th
 
 A project that predates the tooling has no sentinel, so discovery cannot see it. `--bootstrap`
 stamps the lane lineage through the applier — one PR per repo, only `.salgadinhos/` files
-touched, each lane pinned at the target commit (`--to`, default HEAD) so its queue starts empty:
+touched, each lane pinned at the target commit (`--to`, default HEAD): nothing queues until the
+scaffold moves past the pin.
 
 ```bash
 node tools/template-propagate.mjs --bootstrap --project <name> \

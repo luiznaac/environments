@@ -52,7 +52,7 @@ function gitIn(dir, args) {
   return result.stdout.trim();
 }
 
-function sentinelYaml({ source, lane, allow = [], revision = 1, scaffoldSha = "cade1a" }) {
+function sentinelYaml({ source, lane, allow = [], revision = 1, scaffoldSha }) {
   let text = `source: ${source}\nlane: ${lane}\napplied:\n  revision: ${revision}\n  scaffold_sha: ${scaffoldSha}\n`;
   if (allow.length > 0) {
     text += "allow:\n";
@@ -651,14 +651,35 @@ test("runChecks: missing manifest or scaffold file are config errors", () => {
     (error) => error instanceof ConfigError && /manifest missing/.test(error.message),
   );
 
+  // The scaffold file must be gone from the history too: a working-tree removal alone is not a
+  // config error (the queue reads HEAD).
   const missingScaffoldFile = fixture({
     projects: { chameidor: { frontend: { source: "react", files: reactProject() } } },
   });
-  rmSync(join(missingScaffoldFile.environments, "react", "biome.json"));
+  gitIn(missingScaffoldFile.environments, ["rm", "-q", "react/biome.json"]);
+  gitIn(missingScaffoldFile.environments, ["commit", "-qm", "drop biome.json"]);
   assert.throws(
     () => check(missingScaffoldFile),
     (error) => error instanceof ConfigError && /scaffold file missing/.test(error.message),
   );
+});
+
+test("runChecks: an uncommitted scaffold edit is not a queue item", () => {
+  const fix = fixture({
+    projects: { chameidor: { frontend: { source: "react", files: reactProject() } } },
+  });
+  // The working tree moves, HEAD does not: the applier drains commits, so nothing is queued.
+  writeFileSync(join(fix.environments, "react", "biome.json"), '{ "formatter": { "lineWidth": 120 } }\n');
+  assert.deepEqual(check(fix).findings, []);
+});
+
+test("runChecks: an uncommitted scaffold removal is not a config error", () => {
+  const fix = fixture({
+    projects: { chameidor: { frontend: { source: "react", files: reactProject() } } },
+  });
+  rmSync(join(fix.environments, "react", "biome.json"));
+  // HEAD still has it (the working-tree removal is uncommitted): no error, no queue item.
+  assert.deepEqual(check(fix).findings, []);
 });
 
 test("runChecks: a sentinel without applied.scaffold_sha is a config error", () => {

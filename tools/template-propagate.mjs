@@ -51,7 +51,7 @@ import {
   parseVersionCatalog,
   resolveRoots,
 } from "./template-check.mjs";
-import { sentinelText } from "./new-project.mjs";
+import { sentinelFileName, sentinelText } from "./new-project.mjs";
 
 export { ConfigError };
 
@@ -481,30 +481,30 @@ function transformEntry({ entry, scaffoldText, projectText, token, name }) {
   return result.changes.length > 0 ? result : { text: null, changes: [] };
 }
 
-// Mirror of the creation tooling's rule for naming a lane's sentinel file.
-function sentinelFileName(lane) {
-  return lane === "." ? "root" : lane.split(/[\\/]/).filter(Boolean).join("-");
-}
+// A plan starts as this skeleton; the normal (non-bootstrap) path fills applies/skipped etc.
+const basePlan = ({ lane, source, sentinelFile, pin, target, revision = (pin ? null : 1) }) => ({
+  lane,
+  source,
+  sentinelFile,
+  pin,
+  target,
+  revision,
+  applies: [],
+  skipped: [],
+  unclassified: [],
+  observedAllows: [],
+  check: null,
+});
 
 function planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, projectName, gitEnv, bootstrap = false }) {
   const sentinelPath = join(cloneDir, ".salgadinhos", laneSpec.sentinelFile);
   if (bootstrap) {
     if (existsSync(sentinelPath)) return null;
     manifestFor(laneSpec.source); // a bogus source must not get a stamped lineage
-    return {
-      lane: laneSpec.lane,
-      source: laneSpec.source,
-      sentinelFile: laneSpec.sentinelFile,
-      pin: null,
-      target,
-      revision: 1,
-      applies: [],
-      skipped: [],
-      unclassified: [],
-      observedAllows: [],
-      check: null,
-      bootstrapped: true,
-    };
+    if (laneSpec.lane !== "." && !existsSync(join(cloneDir, laneSpec.lane))) {
+      throw new ConfigError(`lane '${laneSpec.lane}' is not on the default branch of ${projectName} — a sentinel for a missing lane would poison discovery`);
+    }
+    return { ...basePlan({ lane: laneSpec.lane, source: laneSpec.source, sentinelFile: laneSpec.sentinelFile, pin: null, target }), bootstrapped: true };
   }
   if (!existsSync(sentinelPath)) {
     throw new ConfigError(`sentinel .salgadinhos/${laneSpec.sentinelFile} is not on the default branch — push the sentinel before propagating`);
@@ -516,19 +516,14 @@ function planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, p
     throw new ConfigError(`pin ${shortSha(pin)} is not an ancestor of ${shortSha(target)} — scaffold history was rewritten?`);
   }
   const manifest = manifestFor(sentinel.source);
-  const plan = {
+  const plan = basePlan({
     lane: laneSpec.lane,
     source: sentinel.source,
     sentinelFile: laneSpec.sentinelFile,
     pin,
     target,
     revision: (sentinel.applied.revision ?? 0) + 1,
-    applies: [],
-    skipped: [],
-    unclassified: [],
-    observedAllows: [],
-    check: null,
-  };
+  });
   if (pin === target) return plan;
   for (const file of changedScaffoldFiles(environmentsPath, sentinel.source, pin, target, gitEnv)) {
     const entry = manifest.entries[file];
@@ -571,6 +566,15 @@ function updateLaneSentinel(plan, cloneDir, target) {
   writeFileSync(sentinelPath, updateSentinelText(text, { revision: plan.revision, scaffoldSha: target, observedAllows: plan.observedAllows }));
 }
 
+// The closing lines every applier PR carries.
+const prTrailer = (command) => [
+  "---",
+  "",
+  `Opened by \`tools/template-propagate.mjs${command}\` (one PR per repo; roll back by closing this PR).`,
+  "The applier never pushes to the base branch directly.",
+  "",
+];
+
 function prBody(target, plans) {
   const lines = [`Propagated from environments@${shortSha(target)}.`, ""];
   for (const plan of plans) {
@@ -587,13 +591,7 @@ function prBody(target, plans) {
     if (plan.check?.command) lines.push("", `Fast check: \`${plan.check.command}\` — ${plan.check.ok ? "passed" : "FAILED"}.`);
     lines.push("");
   }
-  lines.push(
-    "---",
-    "",
-    "Opened by `tools/template-propagate.mjs` (one PR per repo; roll back by closing this PR).",
-    "The applier never pushes to the base branch directly.",
-    "",
-  );
+  lines.push(...prTrailer(""));
   return lines.join("\n");
 }
 
@@ -607,13 +605,7 @@ function bootstrapPrBody(target, plans) {
     lines.push(`## ${plan.lane} (${plan.source})`, "");
     lines.push(`- stamped \`.salgadinhos/${plan.sentinelFile}\` (revision 1, scaffold ${shortSha(target)})`, "");
   }
-  lines.push(
-    "---",
-    "",
-    "Opened by `tools/template-propagate.mjs --bootstrap` (one PR per repo; roll back by closing this PR).",
-    "The applier never pushes to the base branch directly.",
-    "",
-  );
+  lines.push(...prTrailer(" --bootstrap"));
   return lines.join("\n");
 }
 
