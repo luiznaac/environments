@@ -1,8 +1,8 @@
-# Propagation manifest for the python scaffold — read by tools/template-check.mjs and, later, by
-# the applier / creation tooling. `entries` classifies each watched path (owned | pinned | merge |
-# judgment) and `instantiate` names the scaffold; the class semantics live in
-# environments/AGENTS.md ("Propagation: manifests + template-check"). The watchlist is
-# deliberately curated, not a full tree.
+# Propagation manifest for the python scaffold — read by tools/template-check.mjs and
+# tools/template-propagate.mjs. `entries` classifies each watched path (owned | pinned | merge |
+# judgment), `instantiate` names the scaffold and `check` is the lane's fast check; the class
+# semantics live in environments/AGENTS.md ("Propagation: manifests, template-check and
+# template-propagate"). The watchlist is deliberately curated, not a full tree.
 entries:
   pyproject.toml:
     class: merge
@@ -11,6 +11,11 @@ entries:
       - tool.ruff.lint
       - tool.mypy
       - tool.importlinter
+
+# `poe check` is the repo's own fast gate: lint, format, types, layer contracts and unit tests
+# (not the Docker-backed integration suite — that runs in CI on the PR).
+check:
+  command: uv run poe check
 
 # Word-boundary token the scaffold uses as its own name; the creation tooling replaces it with
 # the project name (covers `src/template/`, pyproject `name`/`packages`/`root_package`, the

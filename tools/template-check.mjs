@@ -318,7 +318,25 @@ export function loadManifest(manifestPath) {
     entries[file] = entry;
   }
   const name = parsed?.instantiate?.name;
-  return { entries, instantiate: { name: typeof name === "string" && name !== "" ? name : null } };
+  const rawCheck = parsed?.check;
+  const check = { command: null, timeoutSeconds: null };
+  if (rawCheck != null) {
+    if (typeof rawCheck !== "object" || Array.isArray(rawCheck)) {
+      throw new ConfigError(`${manifestPath}: 'check' must be a map with a 'command'`);
+    }
+    if (typeof rawCheck.command !== "string" || rawCheck.command === "") {
+      throw new ConfigError(`${manifestPath}: 'check.command' must be a non-empty string`);
+    }
+    check.command = rawCheck.command;
+    if (rawCheck.timeout_seconds != null) {
+      const seconds = Number(rawCheck.timeout_seconds);
+      if (!Number.isFinite(seconds) || seconds <= 0) {
+        throw new ConfigError(`${manifestPath}: 'check.timeout_seconds' must be a positive number`);
+      }
+      check.timeoutSeconds = seconds;
+    }
+  }
+  return { entries, instantiate: { name: typeof name === "string" && name !== "" ? name : null }, check };
 }
 
 export function loadSentinel(sentinelPath) {
@@ -335,10 +353,33 @@ export function loadSentinel(sentinelPath) {
       if (!item || typeof item.entry !== "string" || item.entry === "") {
         throw new ConfigError(`sentinel ${sentinelPath}: every 'allow' item needs an 'entry'`);
       }
-      allow.push({ entry: item.entry, reason: typeof item.reason === "string" ? item.reason : null });
+      allow.push({
+        entry: item.entry,
+        reason: typeof item.reason === "string" ? item.reason : null,
+        seenIn: typeof item.seen_in === "string" && item.seen_in !== "" ? item.seen_in : null,
+      });
     }
   }
-  return { source, lane, allow };
+  const rawApplied = parsed?.applied;
+  const applied = { revision: null, scaffoldSha: null };
+  if (rawApplied != null) {
+    if (typeof rawApplied !== "object" || Array.isArray(rawApplied)) {
+      throw new ConfigError(`sentinel ${sentinelPath}: 'applied' must be a map with 'revision' and 'scaffold_sha'`);
+    }
+    if (rawApplied.revision != null) {
+      applied.revision = Number(rawApplied.revision);
+      if (!Number.isInteger(applied.revision) || applied.revision < 0) {
+        throw new ConfigError(`sentinel ${sentinelPath}: applied.revision must be a non-negative integer`);
+      }
+    }
+    if (rawApplied.scaffold_sha != null) {
+      if (typeof rawApplied.scaffold_sha !== "string" || rawApplied.scaffold_sha === "") {
+        throw new ConfigError(`sentinel ${sentinelPath}: applied.scaffold_sha must be a non-empty string (the scaffold commit)`);
+      }
+      applied.scaffoldSha = rawApplied.scaffold_sha;
+    }
+  }
+  return { source, lane, allow, applied };
 }
 
 // ---------------------------------------------------------------------------

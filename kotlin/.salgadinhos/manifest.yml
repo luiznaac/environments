@@ -1,14 +1,19 @@
-# Propagation manifest for the kotlin scaffold — read by tools/template-check.mjs and, later, by
-# the applier / creation tooling. `entries` classifies each watched path (owned | pinned | merge |
-# judgment) and `instantiate` names the scaffold; the class semantics live in
-# environments/AGENTS.md ("Propagation: manifests + template-check"). The watchlist is
-# deliberately curated, not a full tree.
+# Propagation manifest for the kotlin scaffold — read by tools/template-check.mjs and
+# tools/template-propagate.mjs. `entries` classifies each watched path (owned | pinned | merge |
+# judgment), `instantiate` names the scaffold and `check` is the lane's fast check; the class
+# semantics live in environments/AGENTS.md ("Propagation: manifests, template-check and
+# template-propagate"). The watchlist is deliberately curated, not a full tree.
 entries:
   config/detekt/config.yml: owned
   config/detekt/format.yml: owned
   gradle/libs.versions.toml:
     class: pinned
     # No `pins` list: a version catalog compares every `[versions]` alias.
+
+# The verification ladder's first two rungs: compile first (allWarningsAsErrors makes the
+# compiler the strictest gate), then detekt for the configs this manifest watches.
+check:
+  command: ./gradlew compileKotlin compileTestKotlin detekt
 
 # Word-boundary token the scaffold uses as its own name; the creation tooling replaces it with
 # the project name (covers `dev.agner.template`, `rootProject.name` and the docker-compose
