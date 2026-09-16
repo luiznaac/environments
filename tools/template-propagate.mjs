@@ -368,6 +368,8 @@ function changedScaffoldFiles(environmentsPath, source, pin, target, env) {
     .filter((file) => file !== "" && !file.startsWith(".salgadinhos/"));
 }
 
+export { changedScaffoldFiles, isAncestor, resolveCommit };
+
 function scaffoldTextAt(environmentsPath, target, source, file, env) {
   const result = git(environmentsPath, ["show", `${target}:${source}/${file}`], { env, allowFailure: true });
   if (result.status !== 0) throw new ConfigError(`scaffold file missing at ${shortSha(target)}: ${source}/${file}`);
