@@ -13,6 +13,7 @@ import {
   formatFindings,
   jsonDiff,
   loadManifest,
+  loadSentinel,
   parseTomlSections,
   parseVersionCatalog,
   parseYamlLite,
@@ -188,6 +189,7 @@ test("loadManifest: react manifest declares the dependency watchlist and rename 
   ]);
   assert.equal(manifest.entries["biome.json"].class, "owned");
   assert.equal(manifest.instantiate.name, "template");
+  assert.equal(manifest.check.command, "npm run check");
 });
 
 test("loadManifest: kotlin manifest watches detekt + the version catalog", () => {
@@ -195,6 +197,7 @@ test("loadManifest: kotlin manifest watches detekt + the version catalog", () =>
   assert.equal(manifest.entries["config/detekt/config.yml"].class, "owned");
   assert.equal(manifest.entries["gradle/libs.versions.toml"].class, "pinned");
   assert.equal(manifest.instantiate.name, "template");
+  assert.equal(manifest.check.command, "./gradlew compileKotlin compileTestKotlin detekt");
 });
 
 test("loadManifest: python manifest merges pyproject sections", () => {
@@ -206,12 +209,61 @@ test("loadManifest: python manifest merges pyproject sections", () => {
     "tool.mypy",
     "tool.importlinter",
   ]);
+  assert.equal(manifest.check.command, "uv run poe check");
 });
 
 test("loadManifest: php manifest is empty and has no rename token yet", () => {
   const manifest = loadManifest(join(REPO_ROOT, "php", ".salgadinhos", "manifest.yml"));
   assert.deepEqual(manifest.entries, {});
   assert.equal(manifest.instantiate.name, null);
+  assert.equal(manifest.check.command, null);
+});
+
+test("loadManifest: check declares the lane's fast check and its timeout", () => {
+  const root = makeTree({ "manifest.yml": "entries: {}\ncheck:\n  command: npm run check\n  timeout_seconds: 900\n" });
+  const manifest = loadManifest(join(root, "manifest.yml"));
+  assert.deepEqual(manifest.check, { command: "npm run check", timeoutSeconds: 900 });
+});
+
+test("loadManifest: check without a command is a config error", () => {
+  const root = makeTree({ "manifest.yml": "entries: {}\ncheck:\n  timeout_seconds: 60\n" });
+  assert.throws(
+    () => loadManifest(join(root, "manifest.yml")),
+    (error) => error instanceof ConfigError && /check\.command/.test(error.message),
+  );
+});
+
+test("loadSentinel: applied pin and allow seen_in are parsed", () => {
+  const root = makeTree({
+    "frontend.yml": [
+      "source: react",
+      "lane: frontend",
+      "applied:",
+      "  revision: 3",
+      "  scaffold_sha: abc123",
+      "allow:",
+      "  - entry: biome.json",
+      "    reason: divergence by design",
+      "    seen_in: def456",
+      "  - entry: tsconfig.json",
+      "    reason: stricter here",
+      "",
+    ].join("\n"),
+  });
+  const sentinel = loadSentinel(join(root, "frontend.yml"));
+  assert.deepEqual(sentinel.applied, { revision: 3, scaffoldSha: "abc123" });
+  assert.deepEqual(sentinel.allow, [
+    { entry: "biome.json", reason: "divergence by design", seenIn: "def456" },
+    { entry: "tsconfig.json", reason: "stricter here", seenIn: null },
+  ]);
+});
+
+test("loadSentinel: a malformed applied block is a config error", () => {
+  const root = makeTree({ "frontend.yml": "source: react\napplied:\n  revision: not-a-number\n  scaffold_sha: abc\n" });
+  assert.throws(
+    () => loadSentinel(join(root, "frontend.yml")),
+    (error) => error instanceof ConfigError && /applied\.revision/.test(error.message),
+  );
 });
 
 test("loadManifest: unknown class is a config error", () => {

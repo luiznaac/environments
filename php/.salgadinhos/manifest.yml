@@ -1,7 +1,8 @@
-# Propagation manifest for the php scaffold — read by tools/template-check.mjs and, later, by the
-# applier / creation tooling. `entries` classifies each watched path (owned | pinned | merge |
-# judgment) and `instantiate` names the scaffold; the class semantics live in
-# environments/AGENTS.md ("Propagation: manifests + template-check").
+# Propagation manifest for the php scaffold — read by tools/template-check.mjs and
+# tools/template-propagate.mjs. `entries` classifies each watched path (owned | pinned | merge |
+# judgment), `instantiate` names the scaffold and `check` is the lane's fast check; the class
+# semantics live in environments/AGENTS.md ("Propagation: manifests, template-check and
+# template-propagate").
 # The php scaffold is a bare toolchain setup with no consumer yet (deferred until one exists),
 # so nothing is mechanically watched and `entries` stays empty until a project classifies it.
 entries: {}

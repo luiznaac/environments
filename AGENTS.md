@@ -133,26 +133,30 @@ detail in [react/AGENTS.md](react/AGENTS.md); unlike the other three scaffolds i
 Biome + Vitest wired up already — see `template-sync` in the `salgadinhos` repo for porting that
 back into the four generated frontends, which don't have it yet.
 
-## Propagation: manifests + template-check
+## Propagation: manifests, template-check and template-propagate
 
 Each scaffold carries `.salgadinhos/manifest.yml` — the classification the propagation flow
 reads. `entries` maps a path (relative to the scaffold root) to one of four classes:
 
-| Class | Meaning | `template-check` behavior |
-|---|---|---|
-| `owned` | The scaffold owns the file; propagation overwrites it | whole-file compare (JSON structurally, text normalized) |
-| `pinned` | Surgical edit — only the pinned bits move | JSON dependency watchlist (`pins`) or every `[versions]` alias of a TOML catalog |
-| `merge` | The project edits it too; only the listed sections merge | named TOML sections compare |
-| `judgment` | Not mechanical — the porting skill handles it | skipped |
+| Class | Meaning | `template-check` (detector) | `template-propagate` (applier) |
+|---|---|---|---|
+| `owned` | The scaffold owns the file | whole-file compare (JSON structurally, text normalized) | overwrites it with the scaffold's content |
+| `pinned` | Surgical edit — only the pinned bits move | JSON dependency watchlist (`pins`) or every `[versions]` alias of a TOML catalog | updates (or adds) exactly those pins |
+| `merge` | The project edits it too; only the listed sections merge | named TOML sections compare | replaces only the listed sections |
+| `judgment` | Not mechanical — the porting skill handles it | skipped | skipped, reported for the porting skill |
 
 `instantiate.name` is the scaffold's own name token (`template`); creation tooling replaces it
-word-boundedly with the project name, and `template-check` reuses it to normalize scaffold files
-against a project. The watchlist is deliberately curated — add an entry only when the project
-family really should converge on it.
+word-boundedly with the project name, and both tools reuse it to normalize scaffold files
+against a project. `check.command` (optional) is the lane's fast check and `check.timeout_seconds`
+its optional budget (default 15 min, `--check-timeout` overrides); the applier runs it before
+opening a PR. The watchlist is deliberately curated — add an entry only when the project family
+really should converge on it.
 
 Projects are discovered by globbing for `.salgadinhos/<lane>.yml` sentinels (one per lane:
 `source`, `lane`, `applied`, `allow`) — stamped by the creation script / applier, never
-hand-written. `allow: [{ entry, reason }]` is how a lane records an accepted divergence.
+hand-written. `applied.scaffold_sha` is the immutable pin (which scaffold commit the lane last
+absorbed); `applied.revision` is a per-lane counter, for audit — not the from→to unit.
+`allow: [{ entry, reason, seen_in? }]` is how a lane records an accepted divergence.
 
 `tools/template-check.mjs` is the read-only detector: it compares every discovered lane against
 its scaffold manifest and reports DRIFT (project behind — port the scaffold's improvement),
@@ -162,9 +166,42 @@ run; `--code-root <dir>` points at another checkout of the project family (defau
 parent); `--global-agents <file>` overrides the salgadinhos global. Exit codes: 0 clean,
 1 blocking drift, 2 config error.
 
+### The applier
+
+`tools/template-propagate.mjs` applies the mechanical classes for every lane whose pin is behind
+the target commit — **one PR per repo via `gh`; it never pushes to a default branch directly**:
+
 ```bash
-node tools/template-check.mjs     # whole family (needs the sibling repos checked out)
-node --test "tools/*.test.mjs"    # the check's and the creation tooling's tests
+node tools/template-propagate.mjs            # dry run: apply + fast check in a scratch clone
+node tools/template-propagate.mjs --open-pr  # push the branch and open/update one PR per repo
+```
+
+Per repo it clones the origin into a scratch dir (the sibling checkouts are never written to),
+branches `salgadinhos/propagate-<target>`, applies every manifest entry that changed between pin
+and target, bumps each lane sentinel's `applied` to the target, and runs each lane's
+`check.command` (proportional: only lanes that actually applied something). Only a green fast
+check reaches `git push` + `gh pr create`; re-running is idempotent — the branch the previous run
+pushed is checked out again and the open PR is reported instead of duplicated. Scaffold changes
+with no manifest entry are reported but not propagated (they are outside the watchlist by
+design); if one is later classified, `template-check` reports it as DRIFT, since its detection
+is content-based, not range-based. `--to <sha>` propagates up to a specific scaffold commit,
+`--project <name>` narrows the run, and `--skip-check` / `--keep-scratch` / `--check-timeout`
+exist for debugging. Exit codes: 0 clean, 1 a repo failed (fast check, push, PR), 2 global
+config error.
+
+**Verification, rollback and waiver.** The local fast check is the first filter; the destination
+repo's CI on the PR is the real gate, and acceptance is a green check there (the merge itself is
+the human gate). **Rollback = close the PR**: the applier never touches the default branch, so
+closing discards the whole propagation; if it already merged, revert the commit. A divergence
+the family is not actually converging on must not be silently skipped: the lane declares it in
+the sentinel as `allow: [{ entry, reason }]` — renúncia, advance without applying. The applier
+skips the entry, still advances the pin (so the waiver is durable), and stamps `seen_in` with
+the target commit the first time it observes the waiver.
+
+```bash
+node tools/template-check.mjs       # whole family (needs the sibling repos checked out)
+node tools/template-propagate.mjs   # dry-run every lane behind HEAD
+node --test "tools/*.test.mjs"      # the check's, the creation tooling's and the applier's tests
 ```
 
 ### Creation

@@ -1,8 +1,8 @@
-# Propagation manifest for the react scaffold — read by tools/template-check.mjs and, later, by
-# the applier / creation tooling. `entries` classifies each watched path (owned | pinned | merge |
-# judgment) and `instantiate` names the scaffold; the class semantics live in
-# environments/AGENTS.md ("Propagation: manifests + template-check"). The watchlist is
-# deliberately curated, not a full tree.
+# Propagation manifest for the react scaffold — read by tools/template-check.mjs and
+# tools/template-propagate.mjs. `entries` classifies each watched path (owned | pinned | merge |
+# judgment), `instantiate` names the scaffold and `check` is the lane's fast check; the class
+# semantics live in environments/AGENTS.md ("Propagation: manifests, template-check and
+# template-propagate"). The watchlist is deliberately curated, not a full tree.
 entries:
   package.json:
     class: pinned
@@ -20,6 +20,10 @@ entries:
   tsconfig.json: owned
   tsconfig.app.json: owned
   tsconfig.node.json: owned
+
+# The scaffold's own `check` script: typecheck + Biome + Vitest, no browser or Docker.
+check:
+  command: npm run check
 
 # Word-boundary token the scaffold uses as its own name; the creation tooling replaces it with
 # the project name (covers `template-fe` in package.json, the `/template/` base path and the
