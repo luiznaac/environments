@@ -154,17 +154,24 @@ really should converge on it.
 
 Projects are discovered by globbing for `.salgadinhos/<lane>.yml` sentinels (one per lane:
 `source`, `lane`, `applied`, `allow`) — stamped by the creation script / applier, never
-hand-written. `applied.scaffold_sha` is the immutable pin (which scaffold commit the lane last
-absorbed); `applied.revision` is a per-lane counter, for audit — not the from→to unit.
+hand-written (for a project that predates the tooling, the applier's `--bootstrap` stamps it).
+`applied.scaffold_sha` is the immutable pin (which scaffold commit the lane last absorbed);
+`applied.revision` is a per-lane counter, for audit — not the from→to unit.
 `allow: [{ entry, reason, seen_in? }]` is how a lane records an accepted divergence.
 
-`tools/template-check.mjs` is the read-only detector: it compares every discovered lane against
-its scaffold manifest and reports DRIFT (project behind — port the scaffold's improvement),
-AHEAD (project ran ahead — port back or record an `allow`) and RESTATE (a global AGENTS.md rule
-copied verbatim into a project doc). It never applies anything. `--project <name>` narrows the
-run; `--code-root <dir>` points at another checkout of the project family (default: this repo's
-parent); `--global-agents <file>` overrides the salgadinhos global. Exit codes: 0 clean,
-1 blocking drift, 2 config error.
+`tools/template-check.mjs` is the read-only detector: every discovered lane is compared against
+its scaffold manifest in **two views**, both anchored at the pin (`applied.scaffold_sha`):
+
+- **queue** (the scaffold at the pin vs the scaffold now): what the applier would bring to the
+  lane. Reported as DRIFT — blocking unless the entry is `allow`ed.
+- **lane** (the lane vs the scaffold at the pin): the edits the lane made on its own since it
+  applied the pin. Reported as AHEAD, report-only: port back, or declare the divergence in
+  `allow`.
+
+RESTATE flags a global AGENTS.md rule copied verbatim into a project doc. It never applies
+anything. `--project <name>` narrows the run; `--code-root <dir>` points at another checkout of
+the project family (default: this repo's parent); `--global-agents <file>` overrides the
+salgadinhos global. Exit codes: 0 clean, 1 blocking queue drift, 2 config error.
 
 ### The applier
 
@@ -203,6 +210,22 @@ node tools/template-check.mjs       # whole family (needs the sibling repos chec
 node tools/template-propagate.mjs   # dry-run every lane behind HEAD
 node --test "tools/*.test.mjs"      # the check's, the creation tooling's and the applier's tests
 ```
+
+### Bootstrapping an existing project
+
+A project that predates the tooling has no sentinel, so discovery cannot see it. `--bootstrap`
+stamps the lane lineage through the applier — one PR per repo, only `.salgadinhos/` files
+touched, each lane pinned at the target commit (`--to`, default HEAD) so its queue starts empty:
+
+```bash
+node tools/template-propagate.mjs --bootstrap --project <name> \
+    --lane <dir>=<source> [--lane <dir>=<source> ...] [--to <sha>] [--open-pr]
+```
+
+The stamped sentinel is `revision: 1` with `allow: []`; divergences a lane already carries are
+declared later, as detection reports them per lane. Re-runs are idempotent (an already-stamped
+lane reports the open PR instead of a duplicate) and bootstrapping never applies scaffold
+changes — it only pins the baseline.
 
 ### Creation
 
