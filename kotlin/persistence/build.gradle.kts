@@ -21,6 +21,9 @@ tasks.register("generateMigrationScript") {
 tasks.register("migrate") {
     doLast {
         println("To apply migrations locally, run:")
-        println("  MYSQL_HOST=localhost MYSQL_USER=root MYSQL_PASSWORD= java -cp lib/* dev.agner.template.persistence.migration.MigratorKt")
+        println(
+            "  MYSQL_HOST=localhost MYSQL_USER=root MYSQL_PASSWORD= " +
+                "java -cp lib/* dev.agner.template.persistence.migration.MigratorKt",
+        )
     }
 }
