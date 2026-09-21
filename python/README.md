@@ -1,11 +1,6 @@
 # python
 
-A working Python backend service skeleton — the same layered hexagonal architecture as the
-`kotlin/` scaffold, using today's Python tooling: HTTP server (FastAPI), a hand-written
-composition root instead of a DI framework, async database access (SQLAlchemy 2 / MySQL),
-outbound HTTP (httpx), Docker, linting/formatting (Ruff), types (mypy `--strict`),
-architecture enforcement (import-linter), and an integration-test harness (Testcontainers) — all
-wired together and demonstrated end-to-end through one working example endpoint (a health check).
+A working Python backend service skeleton — the same layered hexagonal architecture as the `kotlin/` scaffold, using today's Python tooling: HTTP server (FastAPI), a hand-written composition root instead of a DI framework, async database access (SQLAlchemy 2 / MySQL), outbound HTTP (httpx), Docker, linting/formatting (Ruff), types (mypy `--strict`), architecture enforcement (import-linter), and an integration-test harness (Testcontainers) — all wired together and demonstrated end-to-end through one working example endpoint (a health check).
 
 ## Quick start
 
@@ -31,8 +26,6 @@ curl localhost:8080/health
 
 ## Starting a new project from it
 
-New projects are instantiated by the `new-project` script in `environments`, which applies the
-package/pyproject/Dockerfile/database renames from the manifest's `instantiate:` section, stamps
-the lane sentinel and makes the first commit. Don't copy and rename by hand.
+New projects are instantiated by the `new-project` script in `environments`, which applies the package/pyproject/Dockerfile/database renames from the manifest's `instantiate:` section, stamps the lane sentinel and makes the first commit. Don't copy and rename by hand.
 
 See [AGENTS.md](AGENTS.md) for the architecture and the rules for evolving it.
