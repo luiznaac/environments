@@ -573,7 +573,7 @@ test("real scaffold: react creates a renamed lane and leaves scoped dependency m
   assert.equal(JSON.parse(readFileSync(join(lane, "package-lock.json"), "utf8")).name, "widget-fe");
   assert.match(readFileSync(join(lane, "package-lock.json"), "utf8"), /"@babel\/template"/);
   assert.match(readFileSync(join(lane, "vite.config.ts"), "utf8"), /"\/widget\/"/);
-  assert.match(readFileSync(join(lane, ".env.example"), "utf8"), /"\/widget-api"/);
+  assert.match(readFileSync(join(lane, ".env.example"), "utf8"), /VITE_API_TARGET=http:\/\/localhost:8080/);
   assert.match(readFileSync(join(lane, "index.html"), "utf8"), /<title>widget<\/title>/);
   assert.equal(readFileSync(join(root, "widget", ".salgadinhos", "frontend.yml"), "utf8").includes("source: react"), true);
 });

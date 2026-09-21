@@ -237,6 +237,7 @@ test("loadManifest: kotlin manifest watches detekt + the version catalog", () =>
 
 test("loadManifest: python manifest merges pyproject sections", () => {
   const manifest = loadManifest(join(REPO_ROOT, "python", ".salgadinhos", "manifest.yml"));
+  assert.equal(manifest.entries[".env.example"].class, "judgment");
   assert.equal(manifest.entries["pyproject.toml"].class, "merge");
   assert.deepEqual(manifest.entries["pyproject.toml"].sections, [
     "tool.ruff",

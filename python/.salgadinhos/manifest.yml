@@ -4,6 +4,7 @@
 # semantics live in environments/AGENTS.md ("Propagation: manifests, template-check and
 # template-propagate"). The watchlist is deliberately curated, not a full tree.
 entries:
+  .env.example: judgment
   pyproject.toml:
     class: merge
     sections:
