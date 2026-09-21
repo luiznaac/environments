@@ -511,6 +511,8 @@ test("committed manifests: the live scaffolds declare the creation data", () => 
   assert.equal(kotlin.check, "./gradlew clean build");
   assert.deepEqual(kotlin.keep, ["config/detekt/config.yml", "gradlew", "gradlew.bat"]);
   assert.deepEqual(Object.keys(kotlin.values).sort(), ["db", "image", "port"]);
+  assert.deepEqual(kotlin.values.db.replacements[".env.example"], ["MYSQL_DATABASE=template"]);
+  assert.deepEqual(kotlin.values.port.replacements[".env.example"], ["8080"]);
   assert.equal(kotlin.values.image.style, "whole", "the image override is the full image reference");
 
   const python = loadManifest(join(REPO_ROOT, "python", ".salgadinhos", "manifest.yml")).instantiate;
@@ -536,6 +538,7 @@ test("real scaffold: kotlin creates a renamed lane with the manifest copy and th
   assert.match(readFileSync(join(lane, "settings.gradle.kts"), "utf8"), /rootProject\.name = "widget"/);
   assert.match(readFileSync(join(lane, "build.gradle.kts"), "utf8"), /group = "dev\.agner\.widget"/);
   assert.match(readFileSync(join(lane, "docker-compose.yml"), "utf8"), /MYSQL_DATABASE=widget/);
+  assert.match(readFileSync(join(lane, ".env.example"), "utf8"), /MYSQL_DATABASE=widget/);
   assert.ok(existsSync(join(lane, "usecase", "src", "main", "kotlin", "dev", "agner", "widget", "usecase", "commons", "CommonExtensions.kt")));
   assert.match(readFileSync(join(lane, "config", "detekt", "config.yml"), "utf8"), /licenseTemplateFile: 'license\.template'/, "keep files are untouched");
   assert.match(readFileSync(join(lane, "gradlew"), "utf8"), /Groovy template/, "keep files are untouched");
@@ -570,6 +573,7 @@ test("real scaffold: react creates a renamed lane and leaves scoped dependency m
   assert.equal(JSON.parse(readFileSync(join(lane, "package-lock.json"), "utf8")).name, "widget-fe");
   assert.match(readFileSync(join(lane, "package-lock.json"), "utf8"), /"@babel\/template"/);
   assert.match(readFileSync(join(lane, "vite.config.ts"), "utf8"), /"\/widget\/"/);
+  assert.match(readFileSync(join(lane, ".env.example"), "utf8"), /VITE_API_TARGET=http:\/\/localhost:8080/);
   assert.match(readFileSync(join(lane, "index.html"), "utf8"), /<title>widget<\/title>/);
   assert.equal(readFileSync(join(root, "widget", ".salgadinhos", "frontend.yml"), "utf8").includes("source: react"), true);
 });

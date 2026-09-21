@@ -221,6 +221,7 @@ test("loadManifest: react manifest declares the dependency watchlist and rename 
     "vitest",
   ]);
   assert.equal(manifest.entries["biome.json"].class, "owned");
+  assert.equal(manifest.entries[".env.example"].class, "judgment");
   assert.equal(manifest.instantiate.name, "template");
   assert.equal(manifest.check.command, "npm run check");
 });
@@ -229,12 +230,14 @@ test("loadManifest: kotlin manifest watches detekt + the version catalog", () =>
   const manifest = loadManifest(join(REPO_ROOT, "kotlin", ".salgadinhos", "manifest.yml"));
   assert.equal(manifest.entries["config/detekt/config.yml"].class, "owned");
   assert.equal(manifest.entries["gradle/libs.versions.toml"].class, "pinned");
+  assert.equal(manifest.entries[".env.example"].class, "judgment");
   assert.equal(manifest.instantiate.name, "template");
   assert.equal(manifest.check.command, "./gradlew compileKotlin compileTestKotlin detekt");
 });
 
 test("loadManifest: python manifest merges pyproject sections", () => {
   const manifest = loadManifest(join(REPO_ROOT, "python", ".salgadinhos", "manifest.yml"));
+  assert.equal(manifest.entries[".env.example"].class, "judgment");
   assert.equal(manifest.entries["pyproject.toml"].class, "merge");
   assert.deepEqual(manifest.entries["pyproject.toml"].sections, [
     "tool.ruff",

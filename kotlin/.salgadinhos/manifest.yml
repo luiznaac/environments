@@ -4,6 +4,7 @@
 # semantics live in environments/AGENTS.md ("Propagation: manifests, template-check and
 # template-propagate"). The watchlist is deliberately curated, not a full tree.
 entries:
+  .env.example: judgment
   config/detekt/config.yml: owned
   config/detekt/format.yml: owned
   gradle/libs.versions.toml:
@@ -35,6 +36,8 @@ instantiate:
   values:
     db:
       replacements:
+        .env.example:
+          - MYSQL_DATABASE=template
         docker-compose.yml:
           - MYSQL_DATABASE=template
         persistence/src/main/kotlin/dev/agner/template/persistence/configuration/DatabaseConfig.kt:
@@ -50,6 +53,8 @@ instantiate:
     port:
       default: "8080"
       replacements:
+        .env.example:
+          - "8080"
         application/src/main/resources/application.yaml:
           - "8080"
         integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/HttpRequestService.kt:
