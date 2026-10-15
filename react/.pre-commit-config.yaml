@@ -1,6 +1,15 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: no-commit-to-branch
-        args: [--branch, master]
+        args: [--branch, master, --branch, main]
+
+  - repo: local
+    hooks:
+      - id: test
+        name: test (vitest)
+        entry: sh -c 'npm test'
+        language: system
+        files: '\.(ts|tsx|js|jsx|mjs|cjs)$'
+        pass_filenames: false
