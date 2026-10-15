@@ -5,6 +5,7 @@
 # template-propagate"). The watchlist is deliberately curated, not a full tree.
 entries:
   .env.example: judgment
+  .pre-commit-config.yaml: judgment
   config/detekt/config.yml: owned
   config/detekt/format.yml: owned
   gradle/libs.versions.toml:

@@ -1,9 +1,9 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: no-commit-to-branch
-        args: [--branch, master]
+        args: [--branch, master, --branch, main]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.1
@@ -25,4 +25,10 @@ repos:
         entry: uv run lint-imports
         language: system
         types: [python]
+        pass_filenames: false
+      - id: test
+        name: test (pytest)
+        entry: sh -c 'uv run poe test'
+        language: system
+        files: '\.py$'
         pass_filenames: false
