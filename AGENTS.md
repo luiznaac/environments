@@ -153,7 +153,9 @@ It copies the scaffold (manifest included), applies `instantiate:` — the token
 
 ## Pre-commit
 
-`kotlin/`, `python/`, `react/` and `php/` each carry a `.pre-commit-config.yaml` at their root with `no-commit-to-branch` (protects `master`). `python/` also wires its stack lint (ruff, mypy, import-linter) into the same file; keep any new scaffold consistent — every scaffold gets the branch guard, and whatever lint the stack has is wired into the same file. A new project generated from a scaffold inherits this guard by copying the scaffold's `.pre-commit-config.yaml`.
+Each scaffold carries a `.pre-commit-config.yaml` at its root, and a new project inherits its hooks by copying the scaffold's config. The in-scope scaffolds — `kotlin/`, `python/` and `react/` — carry the family pre-commit standard's two required hooks: the pinned `no-commit-to-branch` guard (protects `master`/`main`) and a local `test` hook that runs the stack's own test command at commit time — `sh -c './gradlew test'` for `kotlin/`, `sh -c 'uv run poe test'` for `python/`, `sh -c 'npm test'` for `react/`. `python/` also wires its stack lint (ruff, mypy, import-linter) into the same file; keep any new scaffold consistent — an in-scope scaffold gets both required hooks, plus whatever lint the stack has wired into the same file.
+
+`php/` is a permanent `exception` under the family pre-commit standard (`docs/salgadinhos/pre-commit-standard.md` in `salgadinhos`) — two-step composer + phpunit, no single runnable test command — so its scaffold keeps only the branch guard.
 
 ## Git
 
