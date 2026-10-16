@@ -17,10 +17,10 @@ application  ->  httpapi     ->  usecase  <-  persistence
 
 One installable package, `src/template/`, with one sub-package per layer:
 
-- **`usecase/`** — the core. Domain models (frozen dataclasses, **no Pydantic**), ports as `typing.Protocol` with an `I` prefix (`IHealthChecker`, `IHealthGateway`, `ITransactionTemplate`), and services. Depends on **nothing** infrastructural — `import-linter` forbids importing `fastapi`, `sqlalchemy`, `httpx`, `pydantic`, `uvicorn` here. `commons/` holds genuinely cross-cutting helpers only (`time.IClock`, `logging.get_logger`, `asyncx.map_async`, `exceptions`).
+- **`usecase/`** — the core. Domain models, ports (`IHealthChecker`, `IHealthGateway`, `ITransactionTemplate`), and services — see [`CODING_STANDARDS.md`](CODING_STANDARDS.md) for their shape. Depends on **nothing** infrastructural — `import-linter` forbids importing `fastapi`, `sqlalchemy`, `httpx`, `pydantic`, `uvicorn` here. `commons/` holds genuinely cross-cutting helpers only (`time.IClock`, `logging.get_logger`, `asyncx.map_async`, `exceptions`).
 - **`persistence/`** — SQLAlchemy 2 async implementations of `usecase` ports against MySQL. `configuration/transaction.py` implements `ITransactionTemplate`; repositories call `current_session()` to get the session bound to the running transaction. No tables yet — `configuration/base.py` has the `DeclarativeBase` to extend.
 - **`gateway/`** — outbound HTTP (httpx). One shared `AsyncClient` from `configuration/http_client.py`, injected everywhere. `AppHealthGateway` + `HttpClientHealthCheck` are the worked example.
-- **`httpapi/`** — FastAPI. Each controller is a class with a `router() -> APIRouter` method (`IController`, the `ControllerTemplate` analogue). `configuration/server.py` mounts every controller the composition root passes it and installs the domain-exception handlers. DTOs live in `schema.py` (Pydantic, edge only).
+- **`httpapi/`** — FastAPI. Each controller is a class with a `router() -> APIRouter` method (`IController`, the `ControllerTemplate` analogue). `configuration/server.py` mounts every controller the composition root passes it and installs the domain-exception handlers. DTOs live in `schema.py`.
 - **`application/`** — the composition root. `settings.py` (pydantic-settings, `APP_ENV` profile), `container.py`, `boot.py`.
 
 ### Wiring model (important — don't reinvent this)
@@ -33,8 +33,8 @@ There is **no DI framework**. `application/container.py` is the single place tha
 
 Example: a database-backed `widgets` catalog exposed over HTTP.
 
-1. **Model the domain** in `usecase/widgets/model.py` (frozen dataclass; separate `WidgetCreation` from `Widget` if the shapes differ).
-2. **Define the port** in `usecase/widgets/gateway.py` (`IWidgetRepository`, a `Protocol`, `async` methods).
+1. **Model the domain** in `usecase/widgets/model.py` (separate `WidgetCreation` from `Widget` if the shapes differ).
+2. **Define the port** in `usecase/widgets/gateway.py` (`IWidgetRepository`, `async` methods).
 3. **Write the service** in `usecase/widgets/service.py` — constructor-injected, depends on the port. Split a pure calculator from the orchestrator if there's real logic.
 4. **Implement the port** in `persistence/widgets/` — a SQLAlchemy entity on `Base`, plus `class WidgetRepository:` whose methods run inside `transaction_template.execute(...)` and use `current_session()`.
 5. **Write the migration** — see "Database migrations" below — rather than adding to `mysql/init.sql` (that file no longer exists).
@@ -55,13 +55,7 @@ Alembic's own files (`alembic.ini`, `alembic/env.py`, `alembic/script.py.mako`, 
 
 ## Conventions
 
-- **`from __future__ import annotations`** at the top of every module.
-- Ports are `Protocol` with an `I` prefix; adapters need not inherit them (structural typing), but may for clarity.
-- Domain models: `@dataclass(frozen=True, slots=True)`. Pydantic only in `httpapi/schema.py` and `application/settings.py`.
-- `async` all the way down; blocking IO via `anyio.to_thread`.
 - A health check never raises — catch `Exception` and return `is_healthy=False`.
-- Time comes from `IClock`, never `datetime.now()` directly in logic.
-- Logs via `get_logger(__name__)`; event-style keys (`_log.info("widgets.listed", count=n)`).
 - Config via `Settings`; nested env vars use `__` (`MYSQL__HOST`).
 
 ## Testing
@@ -76,6 +70,10 @@ uv run poe test:integration  # integration tests
 ## Code style / checks
 
 `uv run poe check` must pass before a change is done. Ruff (lint + format, 120 cols), mypy `--strict`, import-linter, pytest. CI (`.github/workflows/ci.yml`) runs the same. Unit tests must not need Docker; integration tests spin up MySQL via Testcontainers and are marked `integration`.
+
+## Coding standards
+
+- [`CODING_STANDARDS.md`](CODING_STANDARDS.md) — "the language-idiom rules the tooling does not enforce"
 
 ## Configuration
 

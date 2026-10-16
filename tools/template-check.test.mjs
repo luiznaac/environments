@@ -64,6 +64,7 @@ function sentinelYaml({ source, lane, allow = [], revision = 1, scaffoldSha }) {
 }
 
 const REACT_SCAFFOLD = {
+  "CODING_STANDARDS.md": "# Coding standards — React lane\n\nR1 — derive during render.\n",
   "package.json": JSON.stringify(
     {
       dependencies: { react: "^19.0.0", "react-dom": "^19.0.0" },

@@ -6,6 +6,7 @@
 entries:
   .env.example: judgment
   .pre-commit-config.yaml: judgment
+  CODING_STANDARDS.md: owned
   config/detekt/config.yml: owned
   config/detekt/format.yml: owned
   gradle/libs.versions.toml:

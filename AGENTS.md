@@ -47,7 +47,7 @@ application  →  httpapi     →  usecase  ←  persistence
 One package `src/template/`, one sub-package per layer. Key differences from `kotlin/`:
 
 - **No DI framework.** `application/container.py` is a hand-written composition root that builds the object graph once and exposes `health_checkers: list[IHealthChecker]` / `controllers: list[IController]` — the explicit equivalent of Spring collecting `Set<…>`. Adding a checker or endpoint = write the class + one line in `container.py`.
-- Ports are `typing.Protocol` with an `I` prefix (`IHealthChecker`, `ITransactionTemplate`). Domain models are frozen dataclasses — **Pydantic only at the edges** (`httpapi/schema.py`, `application/settings.py`).
+- Ports and domain models follow the scaffold's own [`python/CODING_STANDARDS.md`](python/CODING_STANDARDS.md) (R1–R2) — `Protocol` ports with an `I` prefix; frozen dataclasses, Pydantic only at the edges.
 - FastAPI (not Ktor); SQLAlchemy 2 async + `asyncmy` (not Exposed); httpx (not Ktor client); `structlog` (not Logback); Ruff (not Detekt); mypy `--strict` (the `allWarningsAsErrors` analogue); `pydantic-settings` + `APP_ENV` (not `application.yaml` profiles); `uv` + `poe` (not Gradle); `pytest` + Testcontainers + `pytest-httpserver` (not Kotest + WireMock).
 - `tests/` replaces the `integrationTest` module: `tests/unit/` (no Docker) and `tests/integration/` (spins MySQL, boots the app in-process over ASGI).
 
