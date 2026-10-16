@@ -118,6 +118,10 @@ import java.time.Clock
 
 Note `kotlinx.datetime` sitting in the first block, beside `dev` and `org` — not down with `java`. It is not matched by `kotlin.**` (that slot is the `kotlin.*` stdlib), and this is the one people reorder wrong by hand most often. Don't hand-fix import order at all: `autoCorrect` already does it, and it's faster than you are.
 
+## Coding standards
+
+- [`CODING_STANDARDS.md`](CODING_STANDARDS.md) — "the language-idiom rules the tooling does not enforce"
+
 ## Testing
 
 Kotest `StringSpec` for unit specs and `DescribeSpec` for HTTP/`testApplication` specs, MockK. Unit tests live in each module's `src/test/kotlin`, mirroring the main package layout. Integration tests in `integrationTest/` boot the full stack via docker-compose.

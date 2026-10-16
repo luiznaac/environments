@@ -40,6 +40,10 @@ npm run build         # tsc -b && vite build
 
 Only `src/lib/**` has tests (`vitest.config.ts` restricts `include` to it) — pure logic, no rendering. No component/render tests yet; don't claim UI coverage beyond what this actually checks.
 
+## Coding standards
+
+- [`CODING_STANDARDS.md`](CODING_STANDARDS.md) — "the language-idiom rules the tooling does not enforce"
+
 ## Instantiation
 
 New projects are instantiated from this scaffold by the `new-project` script in `environments` — it applies the `template` renames (package name, base path, title) from the manifest's `instantiate:` section, stamps the lane sentinel and makes the first commit; the creation skill in `salgadinhos` drives the parameters and the follow-up. Don't rename by hand.

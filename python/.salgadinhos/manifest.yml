@@ -6,6 +6,7 @@
 entries:
   .env.example: judgment
   .pre-commit-config.yaml: judgment
+  CODING_STANDARDS.md: owned
   pyproject.toml:
     class: merge
     sections:
