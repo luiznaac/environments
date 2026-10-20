@@ -16,7 +16,16 @@
 //       [--db <name>] [--port <n>] [--image <repo/name>] [--base-path </path/>]
 //       [--code-root <dir>] [--skip-check] [--skip-guard] [--force]
 
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -252,7 +261,8 @@ function copyTree(src, dest, modes = new Map(), current = "") {
     const text = KEEP_EOL.test(entry.name) ? null : readText(from);
     if (text === null) writeFileSync(to, readFileSync(from));
     else writeFileSync(to, text.replace(/\r\n/g, "\n"), "utf8");
-    // `writeFileSync` creates at the default mode; the wrapper scripts carry their bit from here.
+    // writeFileSync creates at the default mode, so a copied `gradlew` would not be runnable.
+    // Carry the mode the scaffold commit records (or the worktree's when the file is untracked).
     chmodSync(to, mode);
   }
 }
