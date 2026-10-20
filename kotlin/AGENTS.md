@@ -82,21 +82,17 @@ Before finishing a change, run these in order — cheapest and most local first,
 ```bash
 ./gradlew compileKotlin compileTestKotlin   # 1. compile
 ./gradlew detekt                            # 2. lint
-./gradlew test                              # 3. all tests, unit + integration
-./gradlew clean build                       # 4. everything CI runs
+./gradlew unitTest --no-daemon              # 3. Docker-free unit suite (the hook's lane)
+./gradlew clean build                       # 4. everything CI runs, integration suite included
 ```
 
 **The order is load-bearing, not a preference.** `allWarningsAsErrors = true` means an unused import or a deprecated call fails the *compiler*, not detekt. Run detekt first and it reports problems the compiler was going to reject anyway — then you fix the same lines twice. Compile first, and the lint pass only ever shows you genuinely stylistic findings.
 
 `autoCorrect = true` means detekt **rewrites** import order and formatting in place as it runs. Treat it as a formatter that also reports: after it finishes, re-read the diff before committing, because a clean "0 issues" exit can still mean your file on disk is not the file you wrote.
 
-Step 3 is not "unit tests" — the root project has no task filter, so `./gradlew test` fans out to every module's `test`, **including `:integrationTest:test`**, which boots MySQL via `DockerComposeExtension` and needs Docker up. To run only the fast in-process tests, exclude it:
+Step 3 is `unitTest`: it depends on every module's `test` except `:integrationTest:test`, so it never touches Docker — this is the lane the pre-commit hook runs. `./gradlew test` is unchanged and still fans out to every module, **including `:integrationTest:test`**, which boots MySQL via `DockerComposeExtension` and needs Docker up; run it when you want both lanes. `:integrationTest:dockerPreflight` probes the daemon first and fails in seconds with a message that says what to do, instead of leaving an opaque `DockerClientProviderStrategy` error to be found in the HTML report.
 
-```bash
-./gradlew test -x :integrationTest:test   # unit tests only, no Docker
-```
-
-Step 4 (`build`) includes steps 1–3 plus detekt and packaging, so a green `build` implies all of them. Running 1–3 first is about *time to feedback*, not about coverage.
+Step 4 (`build`) includes steps 1–3 plus the integration suite and packaging, so a green `build` implies all of them. Running 1–3 first is about *time to feedback*, not about coverage.
 
 ### Import order
 
@@ -124,11 +120,20 @@ Note `kotlinx.datetime` sitting in the first block, beside `dev` and `org` — n
 
 ## Testing
 
-Kotest `StringSpec` for unit specs and `DescribeSpec` for HTTP/`testApplication` specs, MockK. Unit tests live in each module's `src/test/kotlin`, mirroring the main package layout. Integration tests in `integrationTest/` boot the full stack via docker-compose.
+Kotest `StringSpec` for unit specs and `DescribeSpec` for HTTP/`testApplication` specs, MockK.
+
+Test source roots — and the search-before-create rule:
+
+- Each module's `src/test/kotlin` holds its unit specs, **mirroring the main package layout** — a spec for `foo/Bar.kt` lives under `src/test/kotlin/foo/BarTest.kt`, in the same package.
+- `usecase/src/testFixtures/kotlin` holds the shared builders (`BasicHelpers.kt`); add a builder there rather than hand-rolling fixtures per spec.
+- `integrationTest/src/test/kotlin` holds the full-stack specs and their harness (docker-compose, WireMock, Kotest extensions).
+
+Search for an existing spec and an existing fixture **before creating a new one** — a near-duplicate spec or a second `BasicHelpers`-style builder is the usual miss.
 
 ```bash
-./gradlew test                 # unit + integration tests (integrationTest needs Docker)
-./gradlew testCoverageReport   # aggregated JaCoCo report
+./gradlew unitTest --no-daemon   # unit lane — no Docker; the pre-commit hook runs this
+./gradlew test --no-daemon       # every test, integration suite included (needs Docker)
+./gradlew testCoverageReport     # aggregated JaCoCo report
 ```
 
 ## Configuration
@@ -146,9 +151,10 @@ Use `${VAR}` (required) or `${VAR:default}` (optional) for env var substitution.
 ## Build, run, deploy
 
 ```bash
-./gradlew clean build    # full build, same as CI
-./gradlew test           # unit + integration tests
-./gradlew detekt         # lint (auto-fixes what it can)
+./gradlew clean build            # full build, same as CI (needs Docker)
+./gradlew unitTest --no-daemon   # unit tests only, no Docker
+./gradlew test                   # unit + integration tests (needs Docker)
+./gradlew detekt                 # lint (auto-fixes what it can)
 ```
 
 ### When Gradle can't find a JDK
@@ -190,7 +196,7 @@ On Windows the socket mount is `//var/run/docker.sock:/var/run/docker.sock`. The
 `./gradlew clean build` is the CI command, and it is the only thing that exercises everything: compile → detekt → unit tests → the `integrationTest` module → packaging. Two consequences worth knowing before you trust a local run:
 
 - **`integrationTest` is local-only and never "passes" when it didn't run.** It depends on Testcontainers reaching the host daemon (`DockerComposeExtension` boots MySQL), so a suite that was skipped or failed for the environment is reported as **"não executado"**, never as green. With Docker down, `build` fails in the `integrationTest` module — that is a *local environment* failure, not a code failure. Don't chase it in the diff; start Docker.
-- **A green `test` is not a green `build`.** `./gradlew test` runs the `integrationTest` module too, but it still skips detekt and packaging. It's the right stage to run repeatedly while working, and the wrong one to quote as "it passes".
+- **A green `unitTest` or `test` is not a green `build`.** `./gradlew test` runs the `integrationTest` module too, but neither it nor the Docker-free `unitTest` lane runs detekt or packaging. `unitTest` is the right stage to repeat while working; it is the wrong one to quote as "it passes".
 
 Local dev: `docker compose up -d mysql` (or root-level `npm run db`) starts MySQL only, then run via IntelliJ config in `.run/` with `MYSQL_HOST=localhost`, `MYSQL_USER=root`, `MYSQL_PASSWORD=` (dev defaults in `application.yaml`).
 
