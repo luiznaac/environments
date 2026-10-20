@@ -375,6 +375,15 @@ test("cli: creates the lane, renaming paths, contents and JSON package names", (
   assert.equal(pkg.dependencies["@babel/template"], "^7.29.7", "scoped dependency metadata is not a placeholder");
 });
 
+test("cli: keeps an executable file's mode in the created lane", () => {
+  const fix = miniCodeRoot();
+  const environments = join(fix.root, "environments");
+  git(environments, ["update-index", "--chmod=+x", "mini/gradlew"]);
+  git(environments, ["-c", "user.name=test", "-c", "user.email=test@example.test", "commit", "-q", "-m", "chmod gradlew"]);
+  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"])).status, 0);
+  assert.match(git(join(fix.root, "widget", "backend"), ["ls-files", "-s", "--", "gradlew"]), /^100755 /);
+});
+
 test("cli: the project manifest keeps the entries and drops instantiate", () => {
   const fix = miniCodeRoot();
   assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"])).status, 0);

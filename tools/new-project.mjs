@@ -16,12 +16,12 @@
 //       [--db <name>] [--port <n>] [--image <repo/name>] [--base-path </path/>]
 //       [--code-root <dir>] [--skip-check] [--skip-guard] [--force]
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { ConfigError, applyPlaceholders, loadManifest, resolveRoots } from "./template-check.mjs";
+import { ConfigError, applyPlaceholders, loadManifest, modePermissions, resolveRoots } from "./template-check.mjs";
 
 // Creation failures that are not config errors: a red fast check, a leftover, a failed commit.
 export class CreationError extends Error {}
@@ -224,20 +224,36 @@ export function resolveCheckCommand(check, platform = process.platform) {
 // wants CRLF.
 const KEEP_EOL = /\.bat$/i;
 
-function copyTree(src, dest) {
+// Every mode the scaffold commit records, keyed by path relative to the scaffold root. Creation
+// reads these rather than the worktree: Windows has no executable bit to stat.
+function scaffoldModes(environmentsPath, stack, sha) {
+  const modes = new Map();
+  const output = gitText(["ls-tree", "-r", sha, "--", stack], environmentsPath);
+  for (const line of (output ?? "").split("\n")) {
+    const match = line.match(/^(\d{6})\s+\S+\s+\S+\t(.+)$/);
+    if (match && match[2].startsWith(`${stack}/`)) modes.set(match[2].slice(stack.length + 1), match[1]);
+  }
+  return modes;
+}
+
+function copyTree(src, dest, modes = new Map(), current = "") {
   mkdirSync(dest, { recursive: true });
   for (const entry of readdirSync(src, { withFileTypes: true })) {
     if (SKIP_DIRS.has(entry.name)) continue;
     const from = join(src, entry.name);
     const to = join(dest, entry.name);
+    const rel = current ? `${current}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      copyTree(from, to);
+      copyTree(from, to, modes, rel);
       continue;
     }
     if (!entry.isFile()) continue;
+    const mode = modes.has(rel) ? modePermissions(modes.get(rel)) : statSync(from).mode & 0o777;
     const text = KEEP_EOL.test(entry.name) ? null : readText(from);
     if (text === null) writeFileSync(to, readFileSync(from));
     else writeFileSync(to, text.replace(/\r\n/g, "\n"), "utf8");
+    // `writeFileSync` creates at the default mode; the wrapper scripts carry their bit from here.
+    chmodSync(to, mode);
   }
 }
 
@@ -384,7 +400,7 @@ export function createProject({
   if (dirty) log(`[new-project] warning: ${stack}/ has uncommitted changes; the sentinel pins ${scaffoldSha}, not your working copy`);
 
   const laneAbs = join(projectRoot, laneDir);
-  copyTree(join(environmentsPath, stack), laneAbs);
+  copyTree(join(environmentsPath, stack), laneAbs, scaffoldModes(environmentsPath, stack, scaffoldSha));
   const appliedValues = applyValueOverrides(laneAbs, { token, values, overrides });
   renameTokenPaths(laneAbs, token, name);
   rewriteTokenContents(laneAbs, { token, name, keep });

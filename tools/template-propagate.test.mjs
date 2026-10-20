@@ -522,6 +522,73 @@ test("runPropagate: dry-run writes nothing; an open cycle opens exactly one PR",
   );
 });
 
+test("runPropagate: a mode-only move on an owned file is applied and committed", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-mode-"));
+  const scaffold = scaffoldFixture(base, {});
+  git(scaffold.dir, ["update-index", "--chmod=+x", "react/biome.json"]);
+  git(scaffold.dir, ["commit", "-qm", "chmod biome.json"]);
+  const project = projectFixture(base, {
+    lanes: [
+      {
+        lane: "frontend",
+        sentinel: sentinelText({ scaffoldSha: scaffold.pin }),
+        files: {
+          "package.json": `${JSON.stringify({ name: "chameidor-fe", dependencies: { react: "^19.0.0" } }, null, 2)}\n`,
+          "biome.json": '{ "formatter": { "lineWidth": 120 } }\n',
+          "notes.md": "v1\n",
+          "changelog.md": "old\n",
+          "check/ok.mjs": OK_CHECK,
+        },
+      },
+    ],
+  });
+  const result = propagate(base, { dryRun: false, gh: fakeGh() });
+  assert.equal(result.failures, 0);
+  const apply = result.repos[0].lanes[0].applies.find((entry) => entry.file === "biome.json");
+  assert.deepEqual(apply.changes, ["mode 100644 -> 100755"]);
+  const inspect = cloneBranch(base, project.remote, result.repos[0].branch, "inspect-mode");
+  assert.match(git(inspect, ["ls-files", "-s", "--", "frontend/biome.json"]), /^100755 /);
+});
+
+test("runPropagate: a kept owned file is applied verbatim", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-keep-"));
+  const environments = join(base, "environments");
+  writeFiles(environments, {
+    "react/.salgadinhos/manifest.yml": [
+      "entries:",
+      "  run.sh: owned",
+      "check:",
+      "  command: node check/ok.mjs",
+      "instantiate:",
+      "  name: template",
+      "  keep:",
+      "    - run.sh",
+      "",
+    ].join("\n"),
+    "react/run.sh": "echo template v1\n",
+    "react/check/ok.mjs": OK_CHECK,
+  });
+  git(environments, ["init", "-q", "-b", "main"]);
+  git(environments, ["add", "-A"]);
+  git(environments, ["commit", "-qm", "scaffold v1"]);
+  const pin = git(environments, ["rev-parse", "HEAD"]);
+  writeFiles(environments, { "react/run.sh": "echo template v2\n" });
+  commitAll(environments, "scaffold v2");
+  const project = projectFixture(base, {
+    lanes: [
+      {
+        lane: "frontend",
+        sentinel: sentinelText({ scaffoldSha: pin }),
+        files: { "run.sh": "echo template v1\n", "check/ok.mjs": OK_CHECK },
+      },
+    ],
+  });
+  const result = propagate(base, { dryRun: false, gh: fakeGh() });
+  assert.equal(result.failures, 0);
+  const inspect = cloneBranch(base, project.remote, result.repos[0].branch, "inspect-keep");
+  assert.equal(lf(readFileSync(join(inspect, "frontend/run.sh"), "utf8")), "echo template v2\n");
+});
+
 test("runPropagate: one PR per repo with two lanes, merge sections respected", () => {
   const base = mkdtempSync(join(tmpdir(), "template-propagate-merge-"));
   const environments = join(base, "environments");

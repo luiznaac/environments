@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -230,10 +230,17 @@ test("loadManifest: react manifest declares the dependency watchlist and rename 
 test("loadManifest: kotlin manifest watches detekt + the version catalog", () => {
   const manifest = loadManifest(join(REPO_ROOT, "kotlin", ".salgadinhos", "manifest.yml"));
   assert.equal(manifest.entries["config/detekt/config.yml"].class, "owned");
+  assert.equal(manifest.entries["gradlew"].class, "owned");
   assert.equal(manifest.entries["gradle/libs.versions.toml"].class, "pinned");
   assert.equal(manifest.entries[".env.example"].class, "judgment");
   assert.equal(manifest.instantiate.name, "template");
   assert.equal(manifest.check.command, "./gradlew compileKotlin compileTestKotlin detekt");
+});
+
+test("committed scaffolds: kotlin/gradlew carries the executable bit", () => {
+  const result = spawnSync("git", ["ls-files", "-s", "kotlin/gradlew"], { cwd: REPO_ROOT, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^100755 /);
 });
 
 test("loadManifest: python manifest merges pyproject sections", () => {
@@ -514,6 +521,54 @@ test("runChecks: owned JSON diffs are structural in both views", () => {
     queue.map((f) => [f.severity, f.file, f.message]),
     [["drift", "tsconfig.node.json", "scaffold added include.1 since the applied pin"]],
   );
+});
+
+test("runChecks: a mode-only move in the scaffold is queue DRIFT", () => {
+  const fix = fixture({
+    projects: { chameidor: { frontend: { source: "react", files: reactProject() } } },
+  });
+  // The pin has biome.json at 100644; the scaffold moves the bit without touching a byte.
+  chmodSync(join(fix.environments, "react", "biome.json"), 0o755);
+  gitIn(fix.environments, ["update-index", "--chmod=+x", "react/biome.json"]);
+  gitIn(fix.environments, ["commit", "-qm", "chmod biome.json"]);
+  const { findings } = check(fix);
+  assert.deepEqual(
+    findings.map((f) => [f.severity, f.file, f.message]),
+    [["drift", "biome.json", "scaffold mode 100644 -> 100755 since the applied pin"]],
+  );
+  assert.equal(formatFindings(findings).exitCode, 1);
+});
+
+test("runChecks: a mode-only divergence in the lane is AHEAD", { skip: process.platform === "win32" }, () => {
+  const fix = fixture({
+    projects: { chameidor: { frontend: { source: "react", files: reactProject() } } },
+  });
+  chmodSync(join(fix.root, "chameidor", "frontend", "biome.json"), 0o755);
+  const { findings } = check(fix);
+  assert.deepEqual(
+    findings.map((f) => [f.severity, f.file, f.message]),
+    [["ahead", "biome.json", "lane mode 100644 -> 100755 since the applied pin (local edit - port back, or declare it in allow)"]],
+  );
+  assert.equal(formatFindings(findings).exitCode, 0);
+});
+
+test("runChecks: a kept owned file is compared verbatim, not token-substituted", () => {
+  const make = (manifest, projectScript) =>
+    fixture({
+      manifests: { react: manifest },
+      scaffoldFiles: { react: { "script.sh": "echo template\n" } },
+      projects: { chameidor: { frontend: { source: "react", files: { "script.sh": projectScript } } } },
+    });
+  const kept = "entries:\n  script.sh: owned\ninstantiate:\n  name: template\n  keep:\n    - script.sh\n";
+  const unkept = "entries:\n  script.sh: owned\ninstantiate:\n  name: template\n";
+  // Creation keeps the token in a kept file, and detection must match it raw.
+  assert.deepEqual(check(make(kept, "echo template\n")).findings, []);
+  // Renaming it is a lane edit; without the keep marker the substitution would mask it.
+  assert.deepEqual(
+    check(make(kept, "echo chameidor\n")).findings.map((f) => [f.severity, f.file]),
+    [["ahead", "script.sh"]],
+  );
+  assert.deepEqual(check(make(unkept, "echo chameidor\n")).findings, []);
 });
 
 test("runChecks: both views at once — the scaffold moved and the lane edited the same entry", () => {
