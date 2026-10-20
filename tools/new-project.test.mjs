@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -385,6 +384,15 @@ test("cli: creates the lane, renaming paths, contents and JSON package names", (
   assert.equal(pkg.dependencies["@babel/template"], "^7.29.7", "scoped dependency metadata is not a placeholder");
 });
 
+test("cli: keeps an executable file's mode in the created lane", () => {
+  const fix = miniCodeRoot();
+  const environments = join(fix.root, "environments");
+  git(environments, ["update-index", "--chmod=+x", "mini/gradlew"]);
+  git(environments, ["-c", "user.name=test", "-c", "user.email=test@example.test", "commit", "-q", "-m", "chmod gradlew"]);
+  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"])).status, 0);
+  assert.match(git(join(fix.root, "widget", "backend"), ["ls-files", "-s", "--", "gradlew"]), /^100755 /);
+});
+
 test("cli: the project manifest keeps the entries and drops instantiate", () => {
   const fix = miniCodeRoot();
   assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"])).status, 0);
@@ -422,13 +430,6 @@ test("cli: text files are copied LF-canonical and batch files keep their ending"
   const lane = join(fix.root, "widget", "backend");
   assert.equal(readFileSync(join(lane, "crlf.txt"), "utf8"), "a\nb\n");
   assert.equal(readFileSync(join(lane, "run.bat"), "utf8"), "@echo off\r\necho widget\r\n");
-});
-
-test("cli: an executable file stays executable through the copy", { skip: process.platform === "win32" }, () => {
-  const fix = miniCodeRoot();
-  chmodSync(join(fix.root, "environments", "mini", "gradlew"), 0o755);
-  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"])).status, 0);
-  assert.notEqual(statSync(join(fix.root, "widget", "backend", "gradlew")).mode & 0o111, 0);
 });
 
 test("cli: runs the fast check in the created lane", () => {

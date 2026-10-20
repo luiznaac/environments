@@ -6,7 +6,8 @@
 //
 // Class semantics (see environments/AGENTS.md, "Propagation: manifests, template-check and
 // template-propagate"):
-//   - `owned`:    overwrite the file with the scaffold's content (placeholder-substituted).
+//   - `owned`:    overwrite the file with the scaffold's content (placeholder-substituted) and
+//                 its executable bit (recorded in the index, so it lands on every platform).
 //   - `pinned`:   surgical edit — only the watched dependency pins / `[versions]` aliases move.
 //   - `merge`:    replace only the listed TOML sections, leave the rest of the file untouched.
 //   - `judgment`: outside the applier — reported so the porting skill can pick it up.
@@ -36,7 +37,7 @@
 // Exit codes: 0 clean (including "nothing to propagate"), 1 a repo failed (fast check, push, PR),
 // 2 global config error.
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -46,8 +47,11 @@ import {
   ConfigError,
   applyPlaceholders,
   discoverProjects,
+  isExecutableMode,
   loadManifest,
   loadSentinel,
+  modeFromGitOutput,
+  modePermissions,
   parseVersionCatalog,
   resolveRoots,
 } from "./template-check.mjs";
@@ -389,6 +393,20 @@ function scaffoldTextAt(environmentsPath, target, source, file, env) {
   return toLf(result.stdout);
 }
 
+// The executable bit travels in git's tree/index mode, the one source that means the same thing
+// on every platform (`fs.stat` has no executable bit on Windows).
+function gitMode(result) {
+  return result.status === 0 ? modeFromGitOutput(result.stdout) : null;
+}
+
+function scaffoldModeAt(environmentsPath, target, source, file, env) {
+  return gitMode(git(environmentsPath, ["ls-tree", target, "--", `${source}/${file}`], { env, allowFailure: true }));
+}
+
+function indexMode(cwd, path, env) {
+  return gitMode(git(cwd, ["ls-files", "--stage", "--", path], { env, allowFailure: true }));
+}
+
 function originHead(cloneDir, env) {
   const result = git(cloneDir, ["rev-parse", "--abbrev-ref", "origin/HEAD"], { env, allowFailure: true });
   if (result.status !== 0) return null;
@@ -463,13 +481,26 @@ export class Gh {
 // Planning and applying a lane
 // ---------------------------------------------------------------------------
 
-function transformEntry({ entry, scaffoldText, projectText, token, name }) {
+function transformEntry({ entry, scaffoldText, projectText, token, name, scaffoldMode, projectMode }) {
   const projectLf = projectText == null ? null : toLf(projectText);
   const scaffoldLf = toLf(scaffoldText);
   const substitute = (text) => (token ? applyPlaceholders(text, token, name) : text);
   if (entry.class === "owned") {
     const rendered = substitute(scaffoldLf);
-    return projectLf === rendered ? { text: null, changes: [] } : { text: rendered, changes: ["overwrite"] };
+    const changes = [];
+    let text = null;
+    if (projectLf !== rendered) {
+      text = rendered;
+      changes.push("overwrite");
+    }
+    let mode = null;
+    // A file missing from the project starts at git's default 100644: only an executable
+    // scaffold needs an explicit mode write in that case.
+    if (scaffoldMode != null && scaffoldMode !== projectMode && (projectMode != null || isExecutableMode(scaffoldMode))) {
+      mode = scaffoldMode;
+      changes.push(projectMode == null ? `mode ${scaffoldMode}` : `mode ${projectMode} -> ${scaffoldMode}`);
+    }
+    return changes.length > 0 ? { text, mode, changes } : { text: null, mode: null, changes: [] };
   }
   const result =
     entry.class === "pinned" && entry.pins
@@ -480,7 +511,7 @@ function transformEntry({ entry, scaffoldText, projectText, token, name }) {
           ? applyTomlSections(substitute(scaffoldLf), projectText, entry.sections)
           : null;
   if (result === null) throw new ConfigError(`unknown class '${entry.class}'`);
-  return result.changes.length > 0 ? result : { text: null, changes: [] };
+  return result.changes.length > 0 ? { ...result, mode: null } : { text: null, mode: null, changes: [] };
 }
 
 // A plan starts as this skeleton; the normal (non-bootstrap) path fills applies/skipped etc.
@@ -492,6 +523,7 @@ const basePlan = ({ lane, source, sentinelFile, pin, target, revision = (pin ? n
   target,
   revision,
   applies: [],
+  modes: [],
   skipped: [],
   unclassified: [],
   observedAllows: [],
@@ -553,10 +585,25 @@ function planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, p
     const scaffoldText = scaffoldTextAt(environmentsPath, target, sentinel.source, file, gitEnv);
     const projectPath = join(cloneDir, laneSpec.lane, file);
     const projectText = existsSync(projectPath) ? readFileSync(projectPath, "utf8") : null;
-    const transformed = transformEntry({ entry, scaffoldText, projectText, token: manifest.instantiate.name, name: projectName });
-    if (transformed.text === null) continue;
+    const owned = entry.class === "owned";
+    const scaffoldMode = owned ? scaffoldModeAt(environmentsPath, target, sentinel.source, file, gitEnv) : null;
+    const projectMode = owned ? indexMode(cloneDir, `${laneSpec.lane}/${file}`, gitEnv) : null;
+    const transformed = transformEntry({
+      entry,
+      scaffoldText,
+      projectText,
+      token: manifest.instantiate.keep.includes(file) ? null : manifest.instantiate.name,
+      name: projectName,
+      scaffoldMode,
+      projectMode,
+    });
+    if (transformed.text === null && transformed.mode === null) continue;
     mkdirSync(dirname(projectPath), { recursive: true });
-    writeFileSync(projectPath, withEol(transformed.text, dominantEol(projectText ?? "")));
+    if (transformed.text !== null) writeFileSync(projectPath, withEol(transformed.text, dominantEol(projectText ?? "")));
+    if (transformed.mode !== null) {
+      chmodSync(projectPath, modePermissions(transformed.mode));
+      plan.modes.push({ path: `${laneSpec.lane}/${file}`, mode: transformed.mode });
+    }
     plan.applies.push({ file, class: entry.class, changes: transformed.changes });
   }
   return plan;
@@ -679,6 +726,13 @@ function runRepo({ project, lanes, environmentsPath, codeRoot, target, dryRun, s
   }
 
   git(cloneDir, ["add", "-A"], { env: gitEnv });
+  // `git add` records the executable bit from the worktree, which Windows does not carry; set it
+  // in the index explicitly so the committed tree is the same on every platform.
+  for (const plan of plans) {
+    for (const { path, mode } of plan.modes) {
+      git(cloneDir, ["update-index", `--chmod=${isExecutableMode(mode) ? "+x" : "-x"}`, "--", path], { env: gitEnv });
+    }
+  }
   if (git(cloneDir, ["diff", "--cached", "--name-only"], { env: gitEnv }).stdout.trim() === "") return report;
   const title = bootstrap ? `Bootstrap lane sentinels (environments@${shortSha(target)})` : `Propagate scaffold updates (environments@${shortSha(target)})`;
   const body = bootstrap ? bootstrapPrBody(target, plans) : prBody(target, plans);

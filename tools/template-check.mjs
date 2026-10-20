@@ -18,7 +18,9 @@
 //
 // What it compares, derived from each entry's class:
 //   - `owned`:      whole-file equality after normalization (CRLF -> LF, trimmed, whitespace
-//                   collapsed; JSON files are compared structurally).
+//                   collapsed; JSON files are compared structurally) plus the executable bit
+//                   (the scaffold's mode comes from git; a worktree's from the filesystem, which
+//                   has no such bit on Windows, so there the lane side is not compared).
 //   - `pinned`:     a `pins` watchlist in a JSON dependency map, or every `[versions]` alias of
 //                   a TOML version catalog.
 //   - `merge`:      named `[tool.*]` sections of a TOML file, line-normalized.
@@ -36,7 +38,7 @@
 // are then read from this checkout). `--global-agents` defaults to
 // `<code-root>/salgadinhos/global/AGENTS.md`.
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -224,6 +226,29 @@ export const norm = (text) =>
     .map((line) => line.trim())
     .filter((line) => line !== "" && !line.startsWith("#"))
     .join("\n");
+
+// Git records the executable bit as one of two blob modes; every other consumer (`chmod`, the
+// `git update-index --chmod` flag) derives its form from these.
+export const EXECUTABLE_MODE = "100755";
+export const isExecutableMode = (mode) => mode === EXECUTABLE_MODE;
+export const modePermissions = (mode) => (isExecutableMode(mode) ? 0o755 : 0o644);
+
+// The mode token of a `git ls-tree` / `git ls-files --stage` line.
+export function modeFromGitOutput(output) {
+  const line = String(output ?? "").split("\n").find(Boolean);
+  return line ? line.split(/\s+/)[0] : null;
+}
+
+// The executable bit as git records it. Windows filesystems carry no such bit, so a worktree
+// file's mode is unobservable there: `null` means "skip the comparison", never "not executable".
+function worktreeMode(path) {
+  if (process.platform === "win32") return null;
+  try {
+    return (statSync(path).mode & 0o111) === 0 ? "100644" : EXECUTABLE_MODE;
+  } catch {
+    return null;
+  }
+}
 
 // Substitute the scaffold's own name token (e.g. the python scaffold's `template` package) with
 // the project's name, word-bounded so `template` inside another word is left alone.
@@ -518,19 +543,23 @@ const json = (value) => JSON.stringify(value);
 // they belong to: the queue view keeps the DRIFT phrasing, the lane view appends LANE_SUFFIX.
 const viewLabels = (view) => (view === "lane" ? { side: "lane", suffix: LANE_SUFFIX } : { side: "scaffold", suffix: "" });
 
+// `left`/`right` carry the file's text and executable mode, so a mode-only move is a finding too.
 function compareOwned(entry, view, left, right, emit) {
   const { side, suffix } = viewLabels(view);
-  if (left == null && right != null) return emit(`${side} added this file since the applied pin${suffix}`);
-  if (left != null && right == null) {
+  if (left.text == null && right.text != null) return emit(`${side} added this file since the applied pin${suffix}`);
+  if (left.text != null && right.text == null) {
     return emit(view === "lane" ? `lane removed this file since the applied pin${LANE_SUFFIX}` : `scaffold dropped this file since the applied pin`);
   }
-  if (left == null) return;
+  if (left.text == null) return;
+  if (left.mode != null && right.mode != null && left.mode !== right.mode) {
+    emit(`${side} mode ${left.mode} -> ${right.mode} since the applied pin${suffix}`);
+  }
   if (entry.file.endsWith(".json")) {
     let a = null;
     let b = null;
     try {
-      a = JSON.parse(left);
-      b = JSON.parse(right);
+      a = JSON.parse(left.text);
+      b = JSON.parse(right.text);
     } catch {
       // falls through to text comparison
     }
@@ -543,7 +572,7 @@ function compareOwned(entry, view, left, right, emit) {
       return;
     }
   }
-  if (norm(left) !== norm(right)) {
+  if (norm(left.text) !== norm(right.text)) {
     emit(view === "lane" ? `lane diverged from the applied pin${LANE_SUFFIX}` : "scaffold changed since the applied pin");
   }
 }
@@ -602,15 +631,18 @@ function parsePinnedDeps(text, path) {
 
 // The entry's reference side (the applied pin) and its two moving sides (scaffold head, lane),
 // substituted where the class expects it, compared in both views.
-function compareEntryViews(ctx, entry, { pin, head, project }) {
-  const substitute = (text) => (text != null && ctx.placeholder ? applyPlaceholders(text, ctx.placeholder, ctx.project) : text);
+function compareEntryViews(ctx, entry, { pin, head, project, pinMode, headMode, projectMode }) {
+  // `instantiate.keep` names files where the scaffold's token is legitimately part of the file
+  // (e.g. the Gradle wrapper's template comment), so they are compared and applied verbatim.
+  const substitute = (text) => (text != null && ctx.placeholder && !ctx.kept ? applyPlaceholders(text, ctx.placeholder, ctx.project) : text);
+  const side = (text, mode) => ({ text, mode });
   const queue = [];
   const lane = [];
   const emit = (view) => (message) => (view === "queue" ? queue : lane).push(message);
 
   if (entry.class === "owned") {
-    compareOwned(entry, "queue", substitute(pin), substitute(head), emit("queue"));
-    compareOwned(entry, "lane", substitute(pin), substitute(project), emit("lane"));
+    compareOwned(entry, "queue", side(substitute(pin), pinMode), side(substitute(head), headMode), emit("queue"));
+    compareOwned(entry, "lane", side(substitute(pin), pinMode), side(substitute(project), projectMode), emit("lane"));
   } else if (entry.class === "pinned") {
     if (Array.isArray(entry.pins)) {
       const watched = (text, label) => {
@@ -645,7 +677,15 @@ function runEntry(ctx, entry, manifestPath) {
   }
   const pin = ctx.readAtPin(entry.file);
   const project = existsSync(ctx.projectFile) ? readFileSync(ctx.projectFile, "utf8") : null;
-  const { queue, lane } = compareEntryViews(ctx, entry, { pin, head, project });
+  const owned = entry.class === "owned";
+  const { queue, lane } = compareEntryViews({ ...ctx, kept: ctx.keep.includes(entry.file) }, entry, {
+    pin,
+    head,
+    project,
+    pinMode: owned ? ctx.modeAtPin(entry.file) : null,
+    headMode: owned ? ctx.modeAtHead(entry.file) : null,
+    projectMode: owned ? (worktreeMode(ctx.projectFile) ?? ctx.laneMode(entry.file)) : null,
+  });
   for (const message of queue) report(ctx, "drift", message);
   for (const message of lane) report(ctx, "ahead", message);
 }
@@ -710,6 +750,8 @@ export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProj
   // the commit the sentinel applied, the head is the commit the applier drains (not the working
   // tree, so uncommitted scaffold edits cannot read as an un-drainable queue).
   const showCache = new Map();
+  const modeCache = new Map();
+  const laneModeCache = new Map();
   const validatedPins = new Set();
   const gitShow = (args) => spawnSync("git", args, { cwd: environmentsPath, encoding: "utf8", env: process.env, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
   const scaffoldAt = {
@@ -729,6 +771,33 @@ export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProj
       }
       return showCache.get(key);
     },
+    mode(ref, rel) {
+      const key = `${ref}:${rel}`;
+      if (!modeCache.has(key)) {
+        const result = gitShow(["ls-tree", ref, "--", rel]);
+        const line = result.status === 0 ? result.stdout.split("\n").find(Boolean) : null;
+        modeCache.set(key, line ? line.split(/\s+/)[0] : null);
+      }
+      return modeCache.get(key);
+    },
+  };
+
+  // A lane's committed mode. The worktree bit is the direct answer where the platform has one;
+  // Windows has none, so fall back to the lane repo's index mode (the same source the applier
+  // writes), which keeps lane-mode drift detectable there too.
+  const laneMode = (project, lane, file) => {
+    const key = `${project}:${lane}/${file}`;
+    if (!laneModeCache.has(key)) {
+      const result = spawnSync("git", ["ls-files", "--stage", "--", `${lane}/${file}`], {
+        cwd: join(codeRoot, project),
+        encoding: "utf8",
+        env: process.env,
+        windowsHide: true,
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      laneModeCache.set(key, result.status === 0 ? modeFromGitOutput(result.stdout) : null);
+    }
+    return laneModeCache.get(key);
   };
 
   let currentProject = null;
@@ -753,9 +822,13 @@ export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProj
           scaffoldFile: join(environmentsPath, lane.source, entry.file),
           projectFile: join(codeRoot, lane.project, lane.lane, entry.file),
           placeholder: manifest.instantiate.name,
+          keep: manifest.instantiate.keep,
           isAllowed: (file) => lane.allow.some((item) => item.entry === file),
           readAtPin: (file) => scaffoldAt.show(pin, `${lane.source}/${file}`),
           readAtHead: (file) => scaffoldAt.show("HEAD", `${lane.source}/${file}`),
+          modeAtPin: (file) => scaffoldAt.mode(pin, `${lane.source}/${file}`),
+          modeAtHead: (file) => scaffoldAt.mode("HEAD", `${lane.source}/${file}`),
+          laneMode: (file) => laneMode(lane.project, lane.lane, file),
           findings,
         },
         entry,
