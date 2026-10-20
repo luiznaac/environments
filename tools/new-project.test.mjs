@@ -1,6 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, symlinkSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -414,6 +424,13 @@ test("cli: text files are copied LF-canonical and batch files keep their ending"
   assert.equal(readFileSync(join(lane, "run.bat"), "utf8"), "@echo off\r\necho widget\r\n");
 });
 
+test("cli: an executable file stays executable through the copy", { skip: process.platform === "win32" }, () => {
+  const fix = miniCodeRoot();
+  chmodSync(join(fix.root, "environments", "mini", "gradlew"), 0o755);
+  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"])).status, 0);
+  assert.notEqual(statSync(join(fix.root, "widget", "backend", "gradlew")).mode & 0o111, 0);
+});
+
 test("cli: runs the fast check in the created lane", () => {
   const fix = miniCodeRoot();
   const result = runCli(fix.root, createArgs(fix, ["--skip-guard"]));
@@ -542,6 +559,9 @@ test("real scaffold: kotlin creates a renamed lane with the manifest copy and th
   assert.ok(existsSync(join(lane, "usecase", "src", "main", "kotlin", "dev", "agner", "widget", "usecase", "commons", "CommonExtensions.kt")));
   assert.match(readFileSync(join(lane, "config", "detekt", "config.yml"), "utf8"), /licenseTemplateFile: 'license\.template'/, "keep files are untouched");
   assert.match(readFileSync(join(lane, "gradlew"), "utf8"), /Groovy template/, "keep files are untouched");
+  if (process.platform !== "win32") {
+    assert.notEqual(statSync(join(lane, "gradlew")).mode & 0o111, 0, "the committed wrapper is executable");
+  }
   assert.deepEqual(
     loadManifest(join(lane, ".salgadinhos", "manifest.yml")).entries,
     loadManifest(join(REPO_ROOT, "kotlin", ".salgadinhos", "manifest.yml")).entries,

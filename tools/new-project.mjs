@@ -16,7 +16,16 @@
 //       [--db <name>] [--port <n>] [--image <repo/name>] [--base-path </path/>]
 //       [--code-root <dir>] [--skip-check] [--skip-guard] [--force]
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -238,6 +247,10 @@ function copyTree(src, dest) {
     const text = KEEP_EOL.test(entry.name) ? null : readText(from);
     if (text === null) writeFileSync(to, readFileSync(from));
     else writeFileSync(to, text.replace(/\r\n/g, "\n"), "utf8");
+    // writeFileSync creates 0644, so a copied `gradlew` would not be runnable. Carry the source's
+    // executable bit over; the rest of the mode stays the umask's business.
+    const sourceMode = statSync(from).mode;
+    if ((sourceMode & 0o111) !== 0) chmodSync(to, sourceMode & 0o777);
   }
 }
 
