@@ -6,6 +6,8 @@
 entries:
   .env.example: judgment
   .pre-commit-config.yaml: judgment
+  # A lane rewrites the guide for its project; a scaffold change here is a porting judgment.
+  AGENTS.md: judgment
   CODING_STANDARDS.md: owned
   pyproject.toml:
     class: merge

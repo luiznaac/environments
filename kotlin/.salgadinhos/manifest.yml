@@ -6,7 +6,12 @@
 entries:
   .env.example: judgment
   .pre-commit-config.yaml: judgment
+  # A lane rewrites the guide for its project; a scaffold change here is a porting judgment.
+  AGENTS.md: judgment
   CODING_STANDARDS.md: owned
+  # A lane's Gradle build layout carries project-specific modules and dependencies; port by judgment.
+  build.gradle.kts: judgment
+  settings.gradle.kts: judgment
   config/detekt/config.yml: owned
   config/detekt/format.yml: owned
   # The wrapper's executable bit is part of the watched contract: `./gradlew` runs the lane.
