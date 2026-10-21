@@ -8,6 +8,10 @@ Development guidelines for anyone (human, agent, or tool) working in this reposi
 
 There are four independent scaffolds, `kotlin/`, `python/`, `php/`, and `react/`. They do not share code or tooling with each other — treat them as separate repositories that happen to live in the same place. (The root-level `tools/` reads every scaffold's `.salgadinhos/manifest.yml`, but that's the propagation machinery aimed at the scaffolds, not shared scaffold code.) `kotlin/` and `python/` deliberately share the *same architecture* (see below), so a change to the shape of one should usually be mirrored in the other. `react/` is what every project's `frontend/` was generated from — see [react/AGENTS.md](react/AGENTS.md).
 
+## Flow
+
+A scaffold diff names its propagation outcome before the PR. Every changed path that the scaffold's `.salgadinhos/manifest.yml` watches is classified by its entry; the PR body's `## Propagation` carries the outcome — the mechanical class (`owned`/`pinned`/`merge`) that will carry it to the lanes, a `Judgment: #<issue>` follow-up for the porting skill, or `None: <reason>` when no watched path changed. The body-shape guard rejects a scaffold PR body without a valid outcome.
+
 ## `kotlin/` — the Ktor + Spring + Exposed + Flyway template
 
 This is the literal template that [chameidor](../chameidor/AGENTS.md) and [portfolio-2](../portfolio-2/AGENTS.md) were both generated from (package root `dev.agner.template`, renamed to `dev.agner.<project>` on each new project). It is a **complete, runnable vertical slice** built around a single feature — a health check — implemented end-to-end through every layer, so a new project has a working example to copy from rather than empty folders. Includes schema versioning via Flyway migrations (see `kotlin/AGENTS.md`).
