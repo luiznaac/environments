@@ -770,16 +770,20 @@ test("runChecks: an unresolvable pin is a config error", () => {
 // formatFindings / CLI
 // ---------------------------------------------------------------------------
 
+const RESOLVE_ROOTS_FIXTURE = join(tmpdir(), "template-check-resolve-roots");
+const RESOLVE_ROOTS_SCRIPT = join(RESOLVE_ROOTS_FIXTURE, "environments", "tools", "template-check.mjs");
+
 test("resolveRoots: default reads scaffolds from this checkout, siblings one level up", () => {
-  const roots = resolveRoots("C:/code/environments/tools/template-check.mjs", {});
-  assert.equal(roots.environmentsPath.replace(/\\/g, "/"), "C:/code/environments");
-  assert.equal(roots.codeRoot.replace(/\\/g, "/"), "C:/code");
+  const roots = resolveRoots(RESOLVE_ROOTS_SCRIPT, {});
+  assert.equal(roots.environmentsPath, join(RESOLVE_ROOTS_FIXTURE, "environments"));
+  assert.equal(roots.codeRoot, RESOLVE_ROOTS_FIXTURE);
 });
 
 test("resolveRoots: --code-root is a self-contained tree", () => {
-  const roots = resolveRoots("C:/code/environments/tools/template-check.mjs", { codeRoot: "C:/scratch/fixture" });
-  assert.equal(roots.environmentsPath.replace(/\\/g, "/"), "C:/scratch/fixture/environments");
-  assert.equal(roots.codeRoot.replace(/\\/g, "/"), "C:/scratch/fixture");
+  const codeRoot = join(RESOLVE_ROOTS_FIXTURE, "scratch");
+  const roots = resolveRoots(RESOLVE_ROOTS_SCRIPT, { codeRoot });
+  assert.equal(roots.environmentsPath, join(codeRoot, "environments"));
+  assert.equal(roots.codeRoot, codeRoot);
 });
 
 test("formatFindings: no findings exits 0 with the PR #33 line", () => {

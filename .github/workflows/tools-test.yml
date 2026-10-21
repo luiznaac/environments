@@ -1,0 +1,26 @@
+name: Tools tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+# The tools suite is platform-sensitive (path resolution, mode bits, symlinks), and a
+# Windows-shaped fixture once broke the POSIX run. Run the same suite on both so a
+# red tool test blocks the PR on either platform.
+jobs:
+  tools:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run the tools test suite
+        run: node --test "tools/*.test.mjs"
