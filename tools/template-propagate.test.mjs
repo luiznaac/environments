@@ -550,6 +550,119 @@ test("runPropagate: a mode-only move on an owned file is applied and committed",
   assert.match(git(inspect, ["ls-files", "-s", "--", "frontend/biome.json"]), /^100755 /);
 });
 
+// A `watch: mode` scaffold: `gradlew` is owned only at the executable-bit level.
+function watchModeScaffold(base) {
+  const environments = join(base, "environments");
+  writeFiles(environments, {
+    "react/.salgadinhos/manifest.yml": [
+      "entries:",
+      "  gradlew:",
+      "    class: owned",
+      "    watch: mode",
+      "check:",
+      "  command: node check/ok.mjs",
+      "instantiate:",
+      "  name: template",
+      "",
+    ].join("\n"),
+    "react/gradlew": "wrapper v1\n",
+    "react/check/ok.mjs": OK_CHECK,
+  });
+  git(environments, ["init", "-q", "-b", "main"]);
+  git(environments, ["add", "-A"]);
+  git(environments, ["commit", "-qm", "scaffold v1"]);
+  const pin = git(environments, ["rev-parse", "HEAD"]);
+  return { environments, pin };
+}
+
+test("runPropagate: watch: mode applies the bit without reading or rewriting the lane's content", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-watch-"));
+  const { environments, pin } = watchModeScaffold(base);
+  // The scaffold's wrapper moves both content and bit; the content carries a NUL byte, so any
+  // read of it would hit the applier's binary rejection.
+  writeFiles(environments, { "react/gradlew": "new wrapper \u0000 -jar\n" });
+  git(environments, ["add", "react/gradlew"]);
+  git(environments, ["update-index", "--chmod=+x", "react/gradlew"]);
+  // Commit directly: `git add -A` would re-read the worktree bit (no bit on Windows).
+  git(environments, ["commit", "-qm", "scaffold v2"]);
+  const target = git(environments, ["rev-parse", "HEAD"]);
+  const project = projectFixture(base, {
+    lanes: [
+      {
+        lane: "frontend",
+        sentinel: sentinelText({ scaffoldSha: pin }),
+        files: { "gradlew": "lane wrapper -classpath\n", "check/ok.mjs": OK_CHECK },
+      },
+    ],
+  });
+  const result = propagate(base, { dryRun: false, gh: fakeGh() });
+  assert.equal(result.failures, 0);
+  const apply = result.repos[0].lanes[0].applies.find((entry) => entry.file === "gradlew");
+  assert.deepEqual(apply.changes, ["mode 100644 -> 100755"]);
+  const inspect = cloneBranch(base, project.remote, result.repos[0].branch, "inspect-watch");
+  assert.equal(lf(readFileSync(join(inspect, "frontend/gradlew"), "utf8")), "lane wrapper -classpath\n");
+  assert.match(git(inspect, ["ls-files", "-s", "--", "frontend/gradlew"]), /^100755 /);
+  const sentinel = parseYamlLite(readFileSync(join(inspect, ".salgadinhos/frontend.yml"), "utf8"));
+  assert.equal(sentinel.applied.scaffold_sha, target);
+});
+
+test("runPropagate: watch: mode does not touch a file the scaffold added since the pin", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-watch-added-"));
+  const environments = join(base, "environments");
+  writeFiles(environments, {
+    "react/.salgadinhos/manifest.yml": "entries:\n  gradlew:\n    class: owned\n    watch: mode\ncheck:\n  command: node check/ok.mjs\ninstantiate:\n  name: template\n",
+    "react/check/ok.mjs": OK_CHECK,
+  });
+  git(environments, ["init", "-q", "-b", "main"]);
+  git(environments, ["add", "-A"]);
+  git(environments, ["commit", "-qm", "scaffold v1"]);
+  const pin = git(environments, ["rev-parse", "HEAD"]);
+  writeFiles(environments, { "react/gradlew": "scaffold wrapper\n" });
+  git(environments, ["add", "react/gradlew"]);
+  git(environments, ["update-index", "--chmod=+x", "react/gradlew"]);
+  git(environments, ["commit", "-qm", "scaffold v2"]);
+  const project = projectFixture(base, {
+    lanes: [
+      {
+        lane: "frontend",
+        sentinel: sentinelText({ scaffoldSha: pin }),
+        files: { "gradlew": "lane's own file\n", "check/ok.mjs": OK_CHECK },
+      },
+    ],
+  });
+  const result = propagate(base, { dryRun: false, gh: fakeGh() });
+  assert.equal(result.failures, 0);
+  assert.deepEqual(result.repos[0].lanes[0].applies, []);
+  const inspect = cloneBranch(base, project.remote, result.repos[0].branch, "inspect-watch-added");
+  assert.equal(lf(readFileSync(join(inspect, "frontend/gradlew"), "utf8")), "lane's own file\n");
+  assert.match(git(inspect, ["ls-files", "-s", "--", "frontend/gradlew"]), /^100644 /);
+});
+
+test("runPropagate: watch: mode never rewrites content on a content-only scaffold bump", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-watch-content-"));
+  const { environments, pin } = watchModeScaffold(base);
+  writeFiles(environments, { "react/gradlew": "new wrapper content, still 100644\n" });
+  const target = commitAll(environments, "scaffold v2");
+  const project = projectFixture(base, {
+    lanes: [
+      {
+        lane: "frontend",
+        sentinel: sentinelText({ scaffoldSha: pin }),
+        files: { "gradlew": "lane wrapper\n", "check/ok.mjs": OK_CHECK },
+      },
+    ],
+  });
+  const result = propagate(base, { dryRun: false, gh: fakeGh() });
+  assert.equal(result.failures, 0);
+  assert.deepEqual(result.repos[0].lanes[0].applies, []);
+  const inspect = cloneBranch(base, project.remote, result.repos[0].branch, "inspect-watch-content");
+  assert.equal(lf(readFileSync(join(inspect, "frontend/gradlew"), "utf8")), "lane wrapper\n");
+  assert.match(git(inspect, ["ls-files", "-s", "--", "frontend/gradlew"]), /^100644 /);
+  const sentinel = parseYamlLite(readFileSync(join(inspect, ".salgadinhos/frontend.yml"), "utf8"));
+  assert.equal(sentinel.applied.revision, "2", "the pin still advances");
+  assert.equal(sentinel.applied.scaffold_sha, target);
+});
+
 test("runPropagate: a kept owned file is applied verbatim", () => {
   const base = mkdtempSync(join(tmpdir(), "template-propagate-keep-"));
   const environments = join(base, "environments");

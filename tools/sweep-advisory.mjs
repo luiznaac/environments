@@ -10,7 +10,8 @@
 //
 // `runCollect` never writes: it reads sentinels from the sibling project checkouts, the
 // manifests from the scaffolds, and computes each lane's queue as the scaffold's changes
-// between the lane's pin and the target commit, classified by the manifest's class. `runApply`
+// between the lane's pin and the target commit, classified by the manifest's class (`watch:
+// mode` entries count only when the bit moved). `runApply`
 // performs the only writes: sticky comments on open PRs (created or patched in place, matched
 // by the marker line) and the weekly judgment issue.
 //
@@ -24,6 +25,7 @@ import { spawnSync } from "node:child_process";
 import {
   ConfigError,
   discoverProjects,
+  gitModeAt,
   loadManifest,
   loadSentinel,
   resolveRoots,
@@ -69,6 +71,24 @@ function commitsBehind(environmentsPath, pin, target, source, gitEnv) {
   return Number(result.stdout.trim());
 }
 
+// The blob mode of a watched file at a ref, from git's tree (never the file's content).
+function treeMode(environmentsPath, ref, source, file, gitEnv, cache) {
+  const key = `${ref}:${source}/${file}`;
+  if (!cache.has(key)) cache.set(key, gitModeAt(environmentsPath, ref, `${source}/${file}`, gitEnv));
+  return cache.get(key);
+}
+
+// The advisory's lookup for `watch: mode` entries: whether a file's bit moved between the
+// lane's pin and the target. Added or removed files do not move a bit.
+function modeMovedLookup(environmentsPath, pin, target, source, gitEnv) {
+  const cache = new Map();
+  return (file) => {
+    const left = treeMode(environmentsPath, pin, source, file, gitEnv, cache);
+    const right = treeMode(environmentsPath, target, source, file, gitEnv, cache);
+    return left !== null && right !== null && left !== right;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // ISO week (the judgment issue is keyed on it)
 // ---------------------------------------------------------------------------
@@ -95,7 +115,10 @@ function emptyQueue() {
 //   judgment      judgment-class entries — go through the porting skill, never the applier
 //   unclassified  changed in the scaffold, not watched by the manifest (curation decision)
 //   waived        declared divergence in the lane's sentinel (`allow`) — renúncia, excluded
-export function classifyFiles(files, { manifest, allow = [] }) {
+// A `watch: mode` entry is mechanical queue only when the bit moved between the lane's pin and
+// the target; `modeMoved` answers that from the git tree modes (the resolver is the caller's —
+// runCollect reads ls-tree, never content). A content-only bump is not actionable.
+export function classifyFiles(files, { manifest, allow = [], modeMoved }) {
   const queue = emptyQueue();
   for (const file of files) {
     const waiver = allow.find((item) => item.entry === file);
@@ -108,6 +131,9 @@ export function classifyFiles(files, { manifest, allow = [] }) {
       queue.unclassified.push(file);
     } else if (entry.class === "judgment") {
       queue.judgment.push(file);
+    } else if (entry.watch === "mode") {
+      if (typeof modeMoved !== "function") throw new ConfigError(`no mode resolver for watched entry '${file}'`);
+      if (modeMoved(file)) queue.applies.push({ file, class: entry.class });
     } else {
       queue.applies.push({ file, class: entry.class });
     }
@@ -170,15 +196,19 @@ export function renderAdvisory(result, project) {
     if (lane.queue.unclassified.length > 0) {
       lines.push(`- unclassified: ${lane.queue.unclassified.map((file) => `\`${file}\``).join(", ")} — not watched; add a manifest entry if it should converge`);
     }
-    lines.push(
-      "",
-      "Apply the mechanical queue with, from the `environments` checkout:",
-      "",
-      "```",
-      `node tools/template-propagate.mjs --open-pr --project ${project.project} --to ${result.short}`,
-      "```",
-      "",
-    );
+    if (lane.queue.applies.length > 0) {
+      lines.push(
+        "",
+        "Apply the mechanical queue with, from the `environments` checkout:",
+        "",
+        "```",
+        `node tools/template-propagate.mjs --open-pr --project ${project.project} --to ${result.short}`,
+        "```",
+        "",
+      );
+    } else {
+      lines.push("", "- no actionable mechanical change in this range.", "");
+    }
   }
   lines.push(
     "---",
@@ -273,7 +303,7 @@ export function runCollect({
           behind = commitsBehind(environmentsPath, pin, resolvedTarget, laneSpec.source, gitEnv);
           queue = classifyFiles(
             changedScaffoldFiles(environmentsPath, laneSpec.source, pin, resolvedTarget, gitEnv),
-            { manifest, allow: laneSpec.allow },
+            { manifest, allow: laneSpec.allow, modeMoved: modeMovedLookup(environmentsPath, pin, resolvedTarget, laneSpec.source, gitEnv) },
           );
         }
       }

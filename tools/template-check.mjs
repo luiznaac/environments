@@ -21,6 +21,8 @@
 //                   collapsed; JSON files are compared structurally) plus the executable bit
 //                   (the scaffold's mode comes from git; a worktree's from the filesystem, which
 //                   has no such bit on Windows, so there the lane side is not compared).
+//                   `watch: mode` narrows it to the bit: content is never read or compared, and
+//                   the bit compares only when the file exists on both sides.
 //   - `pinned`:     a `pins` watchlist in a JSON dependency map, or every `[versions]` alias of
 //                   a TOML version catalog.
 //   - `merge`:      named `[tool.*]` sections of a TOML file, line-normalized.
@@ -239,6 +241,19 @@ export function modeFromGitOutput(output) {
   return line ? line.split(/\s+/)[0] : null;
 }
 
+// The blob mode of a path at a git ref, from the tree (never the file's content). Callers that
+// ask repeatedly cache the answer; this is the one place the `ls-tree` plumbing is spelled.
+export function gitModeAt(cwd, ref, rel, env = process.env) {
+  const result = spawnSync("git", ["ls-tree", ref, "--", rel], {
+    cwd,
+    encoding: "utf8",
+    env,
+    windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return result.status === 0 ? modeFromGitOutput(result.stdout) : null;
+}
+
 // The executable bit as git records it. Windows filesystems carry no such bit, so a worktree
 // file's mode is unobservable there: `null` means "skip the comparison", never "not executable".
 function worktreeMode(path) {
@@ -422,6 +437,14 @@ export function loadManifest(manifestPath) {
     if (typeof entry.class !== "string" || !CLASSES.has(entry.class)) {
       throw new ConfigError(`${manifestPath}: entry '${file}' has unknown class '${entry.class}' (expected ${[...CLASSES].join(", ")})`);
     }
+    if (entry.watch !== undefined) {
+      if (entry.class !== "owned") {
+        throw new ConfigError(`${manifestPath}: entry '${file}' has 'watch' but 'watch' is valid only on 'owned' (class '${entry.class}')`);
+      }
+      if (entry.watch !== "mode") {
+        throw new ConfigError(`${manifestPath}: entry '${file}' has invalid watch '${entry.watch}' (expected 'mode')`);
+      }
+    }
     if (entry.pins !== undefined && !Array.isArray(entry.pins)) {
       throw new ConfigError(`${manifestPath}: entry '${file}' needs 'pins' as a list of dependency names`);
     }
@@ -546,6 +569,15 @@ const viewLabels = (view) => (view === "lane" ? { side: "lane", suffix: LANE_SUF
 // `left`/`right` carry the file's text and executable mode, so a mode-only move is a finding too.
 function compareOwned(entry, view, left, right, emit) {
   const { side, suffix } = viewLabels(view);
+  // `watch: mode` narrows owned to the executable bit: the scaffold owns the bit, the lane owns
+  // the content. Content is never compared (nor read — the caller passes no text), and the bit
+  // is compared only when the file exists on both sides, so added/removed files are ignored.
+  if (entry.watch === "mode") {
+    if (left.mode != null && right.mode != null && left.mode !== right.mode) {
+      emit(`${side} mode ${left.mode} -> ${right.mode} since the applied pin${suffix}`);
+    }
+    return;
+  }
   if (left.text == null && right.text != null) return emit(`${side} added this file since the applied pin${suffix}`);
   if (left.text != null && right.text == null) {
     return emit(view === "lane" ? `lane removed this file since the applied pin${LANE_SUFFIX}` : `scaffold dropped this file since the applied pin`);
@@ -633,7 +665,8 @@ function parsePinnedDeps(text, path) {
 // substituted where the class expects it, compared in both views.
 function compareEntryViews(ctx, entry, { pin, head, project, pinMode, headMode, projectMode }) {
   // `instantiate.keep` names files where the scaffold's token is legitimately part of the file
-  // (e.g. the Gradle wrapper's template comment), so they are compared and applied verbatim.
+  // (e.g. the Gradle wrapper's template comment), so they are compared and applied verbatim,
+  // without placeholder substitution. A `watch: mode` entry never reaches the content path.
   const substitute = (text) => (text != null && ctx.placeholder && !ctx.kept ? applyPlaceholders(text, ctx.placeholder, ctx.project) : text);
   const side = (text, mode) => ({ text, mode });
   const queue = [];
@@ -669,8 +702,30 @@ function compareEntryViews(ctx, entry, { pin, head, project, pinMode, headMode, 
   return { queue, lane };
 }
 
+// `watch: mode`: the scaffold owns only the executable bit. The two views read the bit from the
+// git trees (scaffold pin/head and the lane's worktree/index), never the content, and the bit is
+// compared only when the file exists on both sides — an added or removed file is ignored.
+function runModeEntry(ctx, entry, manifestPath) {
+  const pinMode = ctx.modeAtPin(entry.file);
+  const headMode = ctx.modeAtHead(entry.file);
+  if (pinMode == null && headMode == null && !existsSync(ctx.scaffoldFile)) {
+    throw new ConfigError(`scaffold file missing: ${ctx.scaffoldFile} (fix ${manifestPath})`);
+  }
+  const { queue, lane } = compareEntryViews({ ...ctx, kept: ctx.keep.includes(entry.file) }, entry, {
+    pin: null,
+    head: null,
+    project: null,
+    pinMode,
+    headMode,
+    projectMode: worktreeMode(ctx.projectFile) ?? ctx.laneMode(entry.file),
+  });
+  for (const message of queue) report(ctx, "drift", message);
+  for (const message of lane) report(ctx, "ahead", message);
+}
+
 function runEntry(ctx, entry, manifestPath) {
   if (entry.class === "judgment") return;
+  if (entry.watch === "mode") return runModeEntry(ctx, entry, manifestPath);
   const head = ctx.readAtHead(entry.file);
   if (head == null && !existsSync(ctx.scaffoldFile)) {
     throw new ConfigError(`scaffold file missing: ${ctx.scaffoldFile} (fix ${manifestPath})`);
@@ -773,11 +828,7 @@ export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProj
     },
     mode(ref, rel) {
       const key = `${ref}:${rel}`;
-      if (!modeCache.has(key)) {
-        const result = gitShow(["ls-tree", ref, "--", rel]);
-        const line = result.status === 0 ? result.stdout.split("\n").find(Boolean) : null;
-        modeCache.set(key, line ? line.split(/\s+/)[0] : null);
-      }
+      if (!modeCache.has(key)) modeCache.set(key, gitModeAt(environmentsPath, ref, rel));
       return modeCache.get(key);
     },
   };

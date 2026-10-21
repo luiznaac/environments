@@ -81,9 +81,12 @@ Each scaffold carries `.salgadinhos/manifest.yml` — the classification the pro
 | Class | Meaning | `template-check` (detector) | `template-propagate` (applier) |
 |---|---|---|---|
 | `owned` | The scaffold owns the file | whole-file compare (JSON structurally, text normalized) plus the executable bit | overwrites it with the scaffold's content and mode |
+| `owned` + `watch: mode` | The scaffold owns only the executable bit; the lane owns the content | compares only the executable bit (the scaffold's from git, the lane's from the worktree/index) in both views, only when the file exists on both sides; content is never read or compared | writes the bit without reading, substituting or writing content, so a lane keeps its own wrapper version; the pin still advances |
 | `pinned` | Surgical edit — only the pinned bits move | JSON dependency watchlist (`pins`) or every `[versions]` alias of a TOML catalog | updates (or adds) exactly those pins |
 | `merge` | The project edits it too; only the listed sections merge | named TOML sections compare | replaces only the listed sections |
 | `judgment` | Not mechanical — the porting skill handles it | skipped | skipped, reported for the porting skill |
+
+`watch` is valid only on `owned`, and `mode` is its only value — anything else is a config error at manifest loading. It exists for files whose *content* is the lane's business but whose *bit* is the scaffold's: the Kotlin `gradlew` is the case that motivated it (a lane's older wrapper and jar must survive propagation while the script stays executable). The sweep advisory lists a mode-only entry as mechanical queue only when the bit moved between the lane's pin and the target; a content-only bump is not actionable.
 
 `instantiate.name` is the scaffold's own name token (`template`); creation tooling replaces it word-boundedly with the project name, and both tools reuse it to normalize scaffold files against a project. `check.command` (optional) is the lane's fast check and `check.timeout_seconds` its optional budget (default 15 min, `--check-timeout` overrides); the applier runs it before opening a PR. The watchlist is deliberately curated — add an entry only when the project family really should converge on it.
 
