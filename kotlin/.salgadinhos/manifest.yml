@@ -15,7 +15,10 @@ entries:
   config/detekt/config.yml: owned
   config/detekt/format.yml: owned
   # The wrapper's executable bit is part of the watched contract: `./gradlew` runs the lane.
-  gradlew: owned
+  # `watch: mode` owns only the bit, so a lane keeps its own wrapper script and jar version.
+  gradlew:
+    class: owned
+    watch: mode
   gradle/libs.versions.toml:
     class: pinned
     # No `pins` list: a version catalog compares every `[versions]` alias.

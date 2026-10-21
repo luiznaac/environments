@@ -8,6 +8,8 @@
 // template-propagate"):
 //   - `owned`:    overwrite the file with the scaffold's content (placeholder-substituted) and
 //                 its executable bit (recorded in the index, so it lands on every platform).
+//                 `watch: mode` narrows it to the bit: content is never read, substituted or
+//                 written, so a lane keeps its own wrapper version and the pin still advances.
 //   - `pinned`:   surgical edit — only the watched dependency pins / `[versions]` aliases move.
 //   - `merge`:    replace only the listed TOML sections, leave the rest of the file untouched.
 //   - `judgment`: outside the applier — reported so the porting skill can pick it up.
@@ -47,6 +49,7 @@ import {
   ConfigError,
   applyPlaceholders,
   discoverProjects,
+  gitModeAt,
   isExecutableMode,
   loadManifest,
   loadSentinel,
@@ -399,10 +402,6 @@ function gitMode(result) {
   return result.status === 0 ? modeFromGitOutput(result.stdout) : null;
 }
 
-function scaffoldModeAt(environmentsPath, target, source, file, env) {
-  return gitMode(git(environmentsPath, ["ls-tree", target, "--", `${source}/${file}`], { env, allowFailure: true }));
-}
-
 function indexMode(cwd, path, env) {
   return gitMode(git(cwd, ["ls-files", "--stage", "--", path], { env, allowFailure: true }));
 }
@@ -482,6 +481,14 @@ export class Gh {
 // ---------------------------------------------------------------------------
 
 function transformEntry({ entry, scaffoldText, projectText, token, name, scaffoldMode, projectMode }) {
+  if (entry.class === "owned" && entry.watch === "mode") {
+    // The scaffold owns only the executable bit: never read, substitute or write content. A lane
+    // missing the file gets no content invented for it, so only an existing file's bit moves.
+    if (projectMode == null || scaffoldMode == null || scaffoldMode === projectMode) {
+      return { text: null, mode: null, changes: [] };
+    }
+    return { text: null, mode: scaffoldMode, changes: [`mode ${projectMode} -> ${scaffoldMode}`] };
+  }
   const projectLf = projectText == null ? null : toLf(projectText);
   const scaffoldLf = toLf(scaffoldText);
   const substitute = (text) => (token ? applyPlaceholders(text, token, name) : text);
@@ -582,11 +589,16 @@ function planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, p
     if (entry.class === "merge" && (!Array.isArray(entry.sections) || entry.sections.length === 0)) {
       throw new ConfigError(`entry '${file}': merge needs a non-empty 'sections' list`);
     }
-    const scaffoldText = scaffoldTextAt(environmentsPath, target, sentinel.source, file, gitEnv);
-    const projectPath = join(cloneDir, laneSpec.lane, file);
-    const projectText = existsSync(projectPath) ? readFileSync(projectPath, "utf8") : null;
     const owned = entry.class === "owned";
-    const scaffoldMode = owned ? scaffoldModeAt(environmentsPath, target, sentinel.source, file, gitEnv) : null;
+    const watchMode = owned && entry.watch === "mode";
+    const scaffoldMode = owned ? gitModeAt(environmentsPath, target, `${sentinel.source}/${file}`, gitEnv) : null;
+    // A mode-only entry acts only when the file exists at both the pin and the target: an added
+    // or removed file moves no bit, so the detector ignores it too.
+    if (watchMode && (scaffoldMode == null || gitModeAt(environmentsPath, pin, `${sentinel.source}/${file}`, gitEnv) == null)) continue;
+    // A `watch: mode` entry never reads content (a binary wrapper is a valid target).
+    const scaffoldText = watchMode ? null : scaffoldTextAt(environmentsPath, target, sentinel.source, file, gitEnv);
+    const projectPath = join(cloneDir, laneSpec.lane, file);
+    const projectText = watchMode ? null : existsSync(projectPath) ? readFileSync(projectPath, "utf8") : null;
     const projectMode = owned ? indexMode(cloneDir, `${laneSpec.lane}/${file}`, gitEnv) : null;
     const transformed = transformEntry({
       entry,

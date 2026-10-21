@@ -336,6 +336,65 @@ test("runCollect: stale and missing pins are reported as such instead of failing
   }
 });
 
+// A `watch: mode` scaffold: `kotlin/gradlew` is owned only at the executable-bit level. v2 moves
+// content only; v3 moves the bit (so a lane pinned at v1 sees two commit windows to compare).
+function watchEnvironmentsFixture(base) {
+  const dir = join(base, "environments");
+  const manifest = [
+    "entries:",
+    "  gradlew:",
+    "    class: owned",
+    "    watch: mode",
+    "instantiate:",
+    "  name: template",
+    "",
+  ].join("\n");
+  writeFiles(dir, {
+    "kotlin/.salgadinhos/manifest.yml": manifest,
+    "kotlin/gradlew": "wrapper v1\n",
+  });
+  git(dir, ["init", "-q", "-b", "main"]);
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "scaffold v1"]);
+  const pin = git(dir, ["rev-parse", "HEAD"]);
+  writeFiles(dir, { "kotlin/gradlew": "wrapper v2, content only\n" });
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "wrapper content bump"]);
+  const contentTarget = git(dir, ["rev-parse", "HEAD"]);
+  writeFiles(dir, { "kotlin/gradlew": "wrapper v3\n" });
+  git(dir, ["add", "kotlin/gradlew"]);
+  git(dir, ["update-index", "--chmod=+x", "kotlin/gradlew"]);
+  git(dir, ["commit", "-qm", "chmod gradlew"]);
+  const modeTarget = git(dir, ["rev-parse", "HEAD"]);
+  return { dir, pin, contentTarget, modeTarget };
+}
+
+test("runCollect: a mode-only entry is mechanical queue only when the bit moved between pin and target", () => {
+  const base = mkdtempSync(join(tmpdir(), "sweep-advisory-watch-"));
+  try {
+    const { dir, pin, contentTarget, modeTarget } = watchEnvironmentsFixture(base);
+    projectFixture(base, {
+      name: "chameidor",
+      lanes: [{ name: "backend", sentinel: sentinelText({ source: "kotlin", lane: "backend", scaffoldSha: pin }) }],
+    });
+    const collect = (target) =>
+      runCollect({ environmentsPath: dir, codeRoot: base, target, sweepRepo: "luiznaac/environments", now: NOW });
+    const contentOnly = collect(contentTarget).projects[0].lanes[0];
+    assert.equal(contentOnly.behind, 1);
+    assert.deepEqual(contentOnly.queue.applies, [], "a content-only bump is not actionable mechanical queue");
+    const contentBody = renderAdvisory(collect(contentTarget), collect(contentTarget).projects[0]);
+    assert.doesNotMatch(contentBody, /- mechanical: `gradlew`/);
+    assert.doesNotMatch(contentBody, /Apply the mechanical queue/);
+    assert.match(contentBody, /- no actionable mechanical change in this range\./);
+
+    const moved = collect(modeTarget).projects[0].lanes[0];
+    assert.deepEqual(moved.queue.applies, [{ file: "gradlew", class: "owned" }]);
+    assert.match(renderAdvisory(collect(modeTarget), collect(modeTarget).projects[0]), /- mechanical: `gradlew` \(owned\)/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("runCollect: the weekly judgment issue carries judgment and unclassified work only", () => {
   const base = mkdtempSync(join(tmpdir(), "sweep-advisory-"));
   try {

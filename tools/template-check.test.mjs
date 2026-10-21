@@ -231,6 +231,7 @@ test("loadManifest: kotlin manifest watches detekt + the version catalog", () =>
   const manifest = loadManifest(join(REPO_ROOT, "kotlin", ".salgadinhos", "manifest.yml"));
   assert.equal(manifest.entries["config/detekt/config.yml"].class, "owned");
   assert.equal(manifest.entries["gradlew"].class, "owned");
+  assert.equal(manifest.entries["gradlew"].watch, "mode");
   assert.equal(manifest.entries["gradle/libs.versions.toml"].class, "pinned");
   assert.equal(manifest.entries[".env.example"].class, "judgment");
   assert.equal(manifest.instantiate.name, "template");
@@ -315,6 +316,31 @@ test("loadManifest: unknown class is a config error", () => {
   assert.throws(
     () => loadManifest(join(root, "manifest.yml")),
     (error) => error instanceof ConfigError && /unknown class 'ownedd'/.test(error.message),
+  );
+});
+
+test("loadManifest: watch: mode narrows an owned entry to the executable bit", () => {
+  const root = makeTree({ "manifest.yml": "entries:\n  gradlew:\n    class: owned\n    watch: mode\n" });
+  const manifest = loadManifest(join(root, "manifest.yml"));
+  assert.deepEqual(manifest.entries.gradlew, { file: "gradlew", class: "owned", watch: "mode" });
+});
+
+test("loadManifest: watch on a non-owned class is a config error", () => {
+  for (const cls of ["pinned", "merge", "judgment"]) {
+    const root = makeTree({ "manifest.yml": `entries:\n  gradlew:\n    class: ${cls}\n    watch: mode\n` });
+    assert.throws(
+      () => loadManifest(join(root, "manifest.yml")),
+      (error) => error instanceof ConfigError && /'watch' is valid only on 'owned'/.test(error.message),
+      `class ${cls} must reject watch`,
+    );
+  }
+});
+
+test("loadManifest: watch accepts only 'mode'", () => {
+  const root = makeTree({ "manifest.yml": "entries:\n  gradlew:\n    class: owned\n    watch: content\n" });
+  assert.throws(
+    () => loadManifest(join(root, "manifest.yml")),
+    (error) => error instanceof ConfigError && /invalid watch 'content'/.test(error.message),
   );
 });
 
@@ -550,6 +576,86 @@ test("runChecks: a mode-only divergence in the lane is AHEAD", { skip: process.p
     [["ahead", "biome.json", "lane mode 100644 -> 100755 since the applied pin (local edit - port back, or declare it in allow)"]],
   );
   assert.equal(formatFindings(findings).exitCode, 0);
+});
+
+// `watch: mode` narrows an owned entry to the executable bit: the scaffold owns the bit, the
+// lane owns the content.
+const MODE_MANIFEST = [
+  "entries:",
+  "  script.sh:",
+  "    class: owned",
+  "    watch: mode",
+  "instantiate:",
+  "  name: template",
+  "",
+].join("\n");
+
+function modeFixture({ projectScript = "echo lane\n", scaffoldFiles = { "script.sh": "echo scaffold v1\n" } } = {}) {
+  return fixture({
+    manifests: { react: MODE_MANIFEST },
+    scaffoldFiles: { react: scaffoldFiles },
+    projects: { chameidor: { frontend: { source: "react", files: { "script.sh": projectScript } } } },
+  });
+}
+
+test("runChecks: watch: mode reports a scaffold mode move as queue DRIFT and ignores content", () => {
+  const fix = modeFixture();
+  writeFileSync(join(fix.environments, "react", "script.sh"), "echo scaffold v2, different content\n");
+  gitIn(fix.environments, ["add", "react/script.sh"]);
+  gitIn(fix.environments, ["update-index", "--chmod=+x", "react/script.sh"]);
+  gitIn(fix.environments, ["commit", "-qm", "chmod script.sh"]);
+  const { findings } = check(fix);
+  assert.deepEqual(
+    findings.map((f) => [f.severity, f.file, f.message]),
+    [["drift", "script.sh", "scaffold mode 100644 -> 100755 since the applied pin"]],
+  );
+  assert.equal(formatFindings(findings).exitCode, 1);
+});
+
+test("runChecks: watch: mode ignores a content-only scaffold change and lane content divergence", () => {
+  const fix = modeFixture({ projectScript: "echo lane, not the scaffold\n" });
+  advanceScaffold(fix, "react", { "script.sh": "echo scaffold v2, still 100644\n" });
+  assert.deepEqual(check(fix).findings, []);
+});
+
+test("runChecks: watch: mode reports the lane's own mode move as AHEAD", { skip: process.platform === "win32" }, () => {
+  const fix = modeFixture();
+  chmodSync(join(fix.root, "chameidor", "frontend", "script.sh"), 0o755);
+  const { findings } = check(fix);
+  assert.deepEqual(
+    findings.map((f) => [f.severity, f.file, f.message]),
+    [["ahead", "script.sh", "lane mode 100644 -> 100755 since the applied pin (local edit - port back, or declare it in allow)"]],
+  );
+  assert.equal(formatFindings(findings).exitCode, 0);
+});
+
+test("runChecks: watch: mode ignores a file the scaffold added since the pin", () => {
+  const fix = fixture({
+    manifests: { react: MODE_MANIFEST },
+    scaffoldFiles: { react: {} },
+    projects: { chameidor: { frontend: { source: "react", files: {} } } },
+  });
+  advanceScaffold(fix, "react", { "script.sh": "echo new\n" });
+  assert.deepEqual(check(fix).findings, []);
+});
+
+test("runChecks: watch: mode ignores a file the scaffold removed since the pin", () => {
+  const fix = modeFixture();
+  gitIn(fix.environments, ["rm", "-q", "react/script.sh"]);
+  gitIn(fix.environments, ["commit", "-qm", "drop script.sh"]);
+  assert.deepEqual(check(fix).findings, []);
+});
+
+test("runChecks: watch: mode on a file the scaffold never had is a config error", () => {
+  const fix = fixture({
+    manifests: { react: MODE_MANIFEST },
+    scaffoldFiles: { react: {} },
+    projects: { chameidor: { frontend: { source: "react", files: {} } } },
+  });
+  assert.throws(
+    () => check(fix),
+    (error) => error instanceof ConfigError && /scaffold file missing/.test(error.message),
+  );
 });
 
 test("runChecks: a kept owned file is compared verbatim, not token-substituted", () => {
