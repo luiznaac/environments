@@ -64,11 +64,7 @@ One package `src/template/`, one sub-package per layer. Key differences from `ko
 
 ## `php/` — the PHP + PHPUnit template
 
-A minimal PHP 8 scaffold: Composer with PSR-4 autoloading (`Src\` → `src/`, `Tests\` → `tests/`), PHPUnit 9.5 for testing, and a `docker-compose.yml` with a `php:8-apache` service (port `8080→80`) plus a `composer` helper service for running Composer commands without installing PHP locally.
-
-- `src/Base.php` / `tests/BaseTest.php` are placeholder examples — replace them, don't extend them, when starting a real project.
-- Run tests: `docker-compose run composer install` then `docker-compose run php vendor/bin/phpunit` (no dedicated script exists yet — if you add one to `composer.json`, document it here).
-- Unlike the Kotlin template, this scaffold has no real feature example — it's a bare toolchain setup. Keep it that way unless you're deliberately adding a second reference example.
+A minimal PHP 8 scaffold: Composer PSR-4 autoloading, PHPUnit, and Docker Compose. Full detail — layout, commands and the placeholder rule — in [php/AGENTS.md](php/AGENTS.md).
 
 ## `react/` — the React + Vite frontend template
 
