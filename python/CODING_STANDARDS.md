@@ -16,6 +16,7 @@ Model the domain with `@dataclass(frozen=True, slots=True)` — immutable, value
 class Widget:
     name: str
 
+
 # Prefer — immutable and slotted
 @dataclass(frozen=True, slots=True)
 class Widget:
@@ -38,6 +39,7 @@ Annotate a classmethod factory or a fluent method with `typing.Self`, not the co
 # Reject — breaks in a subclass (returns the base type)
 @classmethod
 def create(cls) -> "Widget": ...
+
 
 # Prefer — tracks the actual class
 @classmethod
@@ -98,12 +100,16 @@ Iterate a mapping's items, test membership with `in`, and iterate a file line by
 
 ```python
 # Reject — materializes keys / lines needlessly
-for key in counts.keys(): ...
-for line in handle.readlines(): ...
+for key in counts.keys():
+    ...
+for line in handle.readlines():
+    ...
 
 # Prefer — the default iterator
-for key, value in counts.items(): ...
-for line in handle: ...
+for key, value in counts.items():
+    ...
+for line in handle:
+    ...
 ```
 
 Source: Google Python Style Guide §2.8 Default Iterators and Operators.
@@ -146,12 +152,16 @@ Write `if not seq:` rather than `if len(seq) == 0`, and `if value is None` rathe
 
 ```python
 # Reject — explicit emptiness and a truthiness test for None
-if len(items) == 0: ...
-if value == None: ...
+if len(items) == 0:
+    ...
+if value == None:
+    ...
 
 # Prefer — the empty value is already false
-if not items: ...
-if value is None: ...
+if not items:
+    ...
+if value is None:
+    ...
 ```
 
 Source: Google Python Style Guide §2.14 True/False Evaluations. Ruff's `E711` covers the `== None` comparison only; the emptiness idiom has no linter behind it.
