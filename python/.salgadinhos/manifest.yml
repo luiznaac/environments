@@ -8,6 +8,8 @@ entries:
   .pre-commit-config.yaml: judgment
   # A lane rewrites the guide for its project; a scaffold change here is a porting judgment.
   AGENTS.md: judgment
+  # A lane hand-authors its own map; a scaffold change here is a porting judgment, never an overwrite.
+  docs/code-map.md: judgment
   CODING_STANDARDS.md: owned
   pyproject.toml:
     class: merge

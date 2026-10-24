@@ -4,6 +4,10 @@ A starter skeleton for a project frontend, the same stack as chameidor/portfolio
 
 Unlike the four generated frontends today, this scaffold ships with **Biome (lint+format) and Vitest wired up from the start** — drift detection in `environments` reports when that has been ported back into them.
 
+## Code map
+
+- [`docs/code-map.md`](docs/code-map.md)
+
 ## Layout
 
 ```
