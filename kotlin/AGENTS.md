@@ -2,6 +2,10 @@
 
 Development guidelines for anyone (human, agent, or tool) working in this Gradle multi-module template. This is a complete, runnable vertical slice built around a single feature — a health check — implemented end-to-end through every layer. Keep it intact and working; it's the reference example for "how do I wire a new port/adapter".
 
+## Code map
+
+- [`docs/code-map.md`](docs/code-map.md)
+
 ## Architecture
 
 Layered hexagonal. **Dependencies only point inward.** Enforced by the Gradle module graph.
