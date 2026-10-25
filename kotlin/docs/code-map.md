@@ -11,7 +11,7 @@ Module → key files → seam index, plus the app entry points; seeded from the 
 - **`HealthChecker`** (`health/HealthChecker.kt`) — the inbound port every checker implements (`suspend getHealthStatus(): HealthCheckResult`); `http-api`'s `HealthHandler` collects the whole `Set<HealthChecker>` Spring builds.
 - **`HealthGateway`** (`health/HealthGateway.kt`) — the outbound port (`suspend isHealthy(): Boolean`), implemented by `gateway`'s `AppHealthGateway` and consumed by `HttpClientHealthCheck`.
 - **`DomainException`** (`commons/DomainException.kt`) — the error shape crossing to `http-api` (`error` / `userMessage` / `detail`, no HTTP knowledge); subclasses are mapped to statuses at the edge.
-- **`configuration/JsonMapper.kt`** — the single Jackson `ObjectMapper` (kotlinx date/period serializers, `SNAKE_CASE`) shared by the HTTP server and the outbound client; a DTO change here also updates `frontend/src/api/types.ts` in a combined repo.
+- **`configuration/JsonMapper.kt`** — the single Jackson `ObjectMapper` (kotlinx date/period serializers, `SNAKE_CASE`) shared by the HTTP server and the outbound client; in a generated project that also ships a frontend, a DTO change updates its `frontend/src/api/types.ts` in the same commit.
 - **`configuration/TimeProviderConfig.kt`** — the `Clock` bean; logic reads time through the `commons` `now(clock)` extensions, never `Clock.system*` directly, so tests can fix time.
 
 ### `persistence` — Exposed/MySQL adapters and migrations

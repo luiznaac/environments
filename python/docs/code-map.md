@@ -36,7 +36,7 @@ The layers are one package, `src/template/`, with one sub-package each; `import-
 **Files**: `src/template/httpapi/configuration/server.py`; `src/template/httpapi/controller/{base,health_controller}.py`; `src/template/httpapi/schema.py`
 **Seam(s)**:
 - **Route seam** — `IController.router()` returns an `APIRouter`; `server.build_app` mounts every controller the composition root passes in, so adding an endpoint never edits the server wiring.
-- **DTO seam** — Pydantic models in `schema.py` are the edge shape; a DTO change also updates `frontend/src/api/types.ts` in a combined repo, in the same commit.
+- **DTO seam** — Pydantic models in `schema.py` are the edge shape; in a generated project that also ships a frontend, a DTO change updates its `frontend/src/api/types.ts` in the same commit.
 - **Error seam** — `server._install_exception_handlers` maps domain exceptions to the `{"code","detail"}` body; a new domain exception is one handler branch there.
 
 ### `application/` — composition root
@@ -50,7 +50,7 @@ The layers are one package, `src/template/`, with one sub-package each; `import-
 ### `tests/` — the two test lanes
 **Purpose**: unit specs (no Docker) and integration specs that boot the real app against a real MySQL.
 **Files**: `tests/conftest.py`; `tests/unit/test_app_health_gateway.py`; `tests/integration/conftest.py`; `tests/integration/test_health.py`
-**Seam(s)**: `tests/integration/conftest.py` starts MySQL through Testcontainers and drives the real app in-process over ASGI; unit specs construct fakes directly. Add a shared builder to `tests/fixtures.py` (create it when the first one is needed) rather than copying fixtures per spec. `uv run poe check` is the Docker-free fast gate; the integration lane runs in CI.
+**Seam(s)**: `tests/integration/conftest.py` starts MySQL through Testcontainers and drives the real app in-process over ASGI; unit specs construct fakes directly. Put a shared builder next to `tests/conftest.py` rather than copying fixtures per spec. `uv run poe check` is the Docker-free fast gate; the integration lane runs in CI.
 
 ### Repo root — packaging, deploy, CI
 **Purpose**: the toolchain, configuration and container story around the package.
