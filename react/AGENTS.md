@@ -32,6 +32,16 @@ npm run check         # typecheck + lint + test — run before considering a cha
 npm run build         # tsc -b && vite build
 ```
 
+### Fresh worktree setup (sandbox)
+
+A fresh worktree has no `node_modules`, so the first `npm test` fails with `vitest: not found`. In a generated project, this file lands at `frontend/AGENTS.md`; from the monorepo root (its parent), install the lane's dependencies inside the salgadinhos sandbox:
+
+```bash
+node <salgadinhos>/adapters/sandbox/run.mjs --stack node --workspace <repo-root> -- npm --prefix frontend ci
+```
+
+`--stack node` is required because the monorepo root's `package.json` is a dependency-less scripts shim, so the runner's marker detection intentionally does not detect it (its error suggests pointing at `frontend/`). The command mirrors the generated monorepo's `npm run setup`, but the install runs in the sandbox, never on the host — the rule and setup live in `salgadinhos` at `global/AGENTS.md` → "Sandbox for third-party installs" and `docs/salgadinhos/sandbox-bootstrap.md`.
+
 ## Tailwind v4 — config lives in CSS
 
 `src/index.css` has `@import "tailwindcss";` and an `@theme` block — there is no `tailwind.config.js`. `vite.config.ts` wires the `@tailwindcss/vite` plugin.

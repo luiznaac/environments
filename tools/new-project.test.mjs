@@ -587,7 +587,7 @@ test("real scaffold: python creates a renamed lane", () => {
   assert.match(readFileSync(join(lane, "Dockerfile"), "utf8"), /uvicorn", "widget\.application\.boot:app"/);
 });
 
-test("real scaffold: react creates a renamed lane and leaves scoped dependency metadata alone", () => {
+test("real scaffold: react creates a renamed lane with scoped dependency metadata and the sandbox install pointer", () => {
   const root = realCodeRoot();
   const result = runCli(root, ["--code-root", root, "--stack", "react", "--name", "widget", "--skip-check", "--skip-guard"]);
   assert.equal(result.status, 0, result.stderr);
@@ -598,5 +598,12 @@ test("real scaffold: react creates a renamed lane and leaves scoped dependency m
   assert.match(readFileSync(join(lane, "vite.config.ts"), "utf8"), /"\/widget\/"/);
   assert.match(readFileSync(join(lane, ".env.example"), "utf8"), /VITE_API_TARGET=http:\/\/localhost:8080/);
   assert.match(readFileSync(join(lane, "index.html"), "utf8"), /<title>widget<\/title>/);
+  const agents = readFileSync(join(lane, "AGENTS.md"), "utf8");
+  assert.ok(
+    agents.includes(
+      "node <salgadinhos>/adapters/sandbox/run.mjs --stack node --workspace <repo-root> -- npm --prefix frontend ci",
+    ),
+    "the generated lane carries the sandbox install command",
+  );
   assert.equal(readFileSync(join(root, "widget", ".salgadinhos", "frontend.yml"), "utf8").includes("source: react"), true);
 });
