@@ -5,6 +5,9 @@
 # template-propagate"). The watchlist is deliberately curated, not a full tree.
 entries:
   .env.example: judgment
+  # A lane's compose diverges structurally (extra services, volumes, deploy bits); a scaffold
+  # change here is a porting judgment, never an overwrite.
+  docker-compose.yml: judgment
   .pre-commit-config.yaml: judgment
   # A lane rewrites the guide for its project; a scaffold change here is a porting judgment.
   AGENTS.md: judgment
@@ -81,9 +84,24 @@ instantiate:
       default: "8080"
       replacements:
         .env.example:
-          - "8080"
+          - KTOR_PORT={{value}}
         application/src/main/resources/application.yaml:
-          - "8080"
+          - "port: ${KTOR_PORT:{{value}}}"
+    mysqlPort:
+      default: "3306"
+      replacements:
+        .env.example:
+          - MYSQL_PORT={{value}}
+        application/src/main/resources/application.yaml:
+          - "port: ${MYSQL_PORT:{{value}}}"
+        # The host side of the publish mapping; the container side stays fixed at 3306.
+        docker-compose.yml:
+          - "MYSQL_PORT:-{{value}}}:3306"
+        # The standalone Flyway/migration fallback and the unit test that pins it.
+        persistence/src/main/kotlin/dev/agner/template/persistence/configuration/MySqlEndpoint.kt:
+          - DEFAULT_MYSQL_PORT = {{value}}
+        persistence/src/test/kotlin/dev/agner/template/persistence/configuration/MySqlEndpointTest.kt:
+          - shouldBe {{value}}
     image:
       # The override is the complete image reference (`luiznaac/<project>`).
       style: whole

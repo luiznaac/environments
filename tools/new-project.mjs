@@ -8,12 +8,15 @@
 // The mechanical contract is entirely manifest data: `instantiate.name` is the token renamed to
 // the project name (word-bounded in text and paths, package-name-shaped in JSON values),
 // `instantiate.lane` the default lane dir, `check` the fast check, `keep` the files where the
-// token is not a placeholder, and `values` the convention overrides (`db`, `port`, `image`,
-// `basePath`) as file-scoped literal swaps.
+// token is not a placeholder, and `values` the convention overrides (`db`, `port`, `mysqlPort`,
+// `frontendDevPort`, `image`, `basePath`) as file-scoped literal swaps. A port role's literal may
+// carry `{{value}}` (the role's computed number); the port roles run before the other values and
+// every value runs before the name token.
 //
 // Usage:
 //   node tools/new-project.mjs --stack <stack> --name <project> [--lane <dir>] [--to <dir>]
-//       [--db <name>] [--port <n>] [--image <repo/name>] [--base-path </path/>]
+//       [--db <name>] [--port <n>] [--mysql-port <n>] [--frontend-dev-port <n>]
+//       [--image <repo/name>] [--base-path </path/>]
 //       [--code-root <dir>] [--skip-check] [--skip-guard] [--force]
 
 import {
@@ -30,7 +33,7 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { ConfigError, applyPlaceholders, loadManifest, modePermissions, resolveRoots } from "./template-check.mjs";
+import { ConfigError, VALUE_PLACEHOLDER, applyPlaceholders, loadManifest, modePermissions, resolveRoots } from "./template-check.mjs";
 
 // Creation failures that are not config errors: a red fast check, a leftover, a failed commit.
 export class CreationError extends Error {}
@@ -140,15 +143,35 @@ export function findTokenLeftovers(rootDir, { token, keep = [] }) {
   return hits.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }
 
-// Convention values (`db`, `port`, `image`, `basePath`) with an override: swap the literals each
-// value declares, in the files it declares them in. Style `token` (default) means the literal
-// carries context around the token (`3306/template`, `MYSQL_DATABASE=template`) and the token in
-// it becomes the override, keeping the context; `whole` means the override is the literal's full
-// replacement (`luiznaac/template` -> the image reference). A literal without the token (`8080`)
-// is replaced wholesale either way. Called before the token pass, so paths still carry the token.
+// Convention values (`db`, `port`, `mysqlPort`, `frontendDevPort`, `image`, `basePath`) with an
+// override: swap the literals each value declares, in the files it declares them in. A literal may
+// carry `{{value}}`, replaced with the override while the rest of the literal stays as context
+// (`"{{value}}:3306"` -> `"8112:3306"`, `${MYSQL_PORT:-{{value}}}:3306` likewise). A literal
+// without it is replaced wholesale (`8080` -> the override), unless style `token` (default) means
+// the literal carries context around the token (`3306/template`, `MYSQL_DATABASE=template`) and
+// the token in it becomes the override, keeping the context; `whole` means the override is the
+// literal's full replacement (`luiznaac/template` -> the image reference). Called before the token
+// pass, so paths still carry the token.
+//
+// The port roles, in block order: API first, then the rest. Their literals may carry
+// `{{value}}`; they run before the other convention values, and every value runs before the name
+// token.
+const PORT_VALUE_KEYS = ["port", "mysqlPort", "frontendDevPort"];
+
+export const fillValue = (literal, value) => literal.split(VALUE_PLACEHOLDER).join(value);
+
+function orderedValueKeys(values) {
+  const portKeys = PORT_VALUE_KEYS.filter((key) => key in values);
+  const otherKeys = Object.keys(values).filter((key) => !PORT_VALUE_KEYS.includes(key));
+  return [...portKeys, ...otherKeys];
+}
+
+const cliFlag = (key) => `--${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
+
 export function applyValueOverrides(rootDir, { token, values, overrides }) {
   const applied = [];
-  for (const [key, spec] of Object.entries(values)) {
+  for (const key of orderedValueKeys(values)) {
+    const spec = values[key];
     if (overrides[key] === undefined) continue;
     for (const [file, literals] of Object.entries(spec.replacements)) {
       const abs = join(rootDir, file);
@@ -156,9 +179,14 @@ export function applyValueOverrides(rootDir, { token, values, overrides }) {
       let text = readText(abs);
       if (text === null) throw new ConfigError(`instantiate.values.${key}: declared file is not text: ${file}`);
       for (const literal of literals) {
-        const substitute = spec.style !== "whole" && tokenWord(token).test(literal);
-        const replacement = substitute ? literal.replace(tokenWord(token), overrides[key]) : overrides[key];
-        text = text.split(literal).join(replacement);
+        const templated = literal.includes(VALUE_PLACEHOLDER);
+        const search = templated ? fillValue(literal, spec.default) : literal;
+        const replacement = templated
+          ? fillValue(literal, overrides[key])
+          : spec.style !== "whole" && tokenWord(token).test(literal)
+            ? literal.replace(tokenWord(token), overrides[key])
+            : overrides[key];
+        text = text.split(search).join(replacement);
       }
       writeFileSync(abs, text, "utf8");
     }
@@ -384,8 +412,10 @@ export function createProject({
       );
     }
   }
-  if (overrides.port !== undefined && !/^[0-9]+$/.test(overrides.port)) {
-    throw new ConfigError(`--port must be a number, got '${overrides.port}'`);
+  for (const key of PORT_VALUE_KEYS) {
+    if (overrides[key] !== undefined && !/^[0-9]+$/.test(overrides[key])) {
+      throw new ConfigError(`${cliFlag(key)} must be a number, got '${overrides[key]}'`);
+    }
   }
 
   const effectivePort = overrides.port ?? values.port?.default;
@@ -462,6 +492,9 @@ const USAGE = `usage: node tools/new-project.mjs --stack <stack> --name <project
                       (default: the parent of this checkout)
   --db <name>         override the DB name (convention: the project name)
   --port <n>          override the app port (convention: 8080, collision-checked)
+  --mysql-port <n>    override the MySQL host port (convention: 3306)
+  --frontend-dev-port <n>
+                      override the frontend dev port (convention: 5273)
   --image <repo/name> override the published image
   --base-path </p/>   override the SPA base path
   --skip-check        do not run the scaffold's fast check
@@ -484,6 +517,8 @@ export function parseArgs(argv) {
     else if (flag === "--code-root") args.codeRoot = value();
     else if (flag === "--db") args.overrides.db = value();
     else if (flag === "--port") args.overrides.port = value();
+    else if (flag === "--mysql-port") args.overrides.mysqlPort = value();
+    else if (flag === "--frontend-dev-port") args.overrides.frontendDevPort = value();
     else if (flag === "--image") args.overrides.image = value();
     else if (flag === "--base-path") args.overrides.basePath = value();
     else if (flag === "--skip-check") args.skipCheck = true;

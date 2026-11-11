@@ -49,6 +49,9 @@ export class ConfigError extends Error {}
 
 const CLASSES = new Set(["owned", "pinned", "merge", "judgment"]);
 
+// The placeholder a value literal may carry: creation resolves it to the role's number.
+export const VALUE_PLACEHOLDER = "{{value}}";
+
 // ---------------------------------------------------------------------------
 // YAML-lite: exactly the subset the manifests and sentinels use — nested maps
 // by indentation, block sequences, inline flow sequences, quoted or plain
@@ -396,6 +399,12 @@ function parseInstantiateValues(raw, manifestPath) {
         throw new ConfigError(`${manifestPath}: 'instantiate.values.${key}.replacements.${file}' must be a list of strings`);
       }
       value.replacements[file] = literals;
+    }
+    const usesPlaceholder = Object.values(value.replacements).some((literals) =>
+      literals.some((literal) => literal.includes(VALUE_PLACEHOLDER)),
+    );
+    if (value.default === undefined && usesPlaceholder) {
+      throw new ConfigError(`${manifestPath}: 'instantiate.values.${key}' uses '{{value}}' but declares no 'default' (the search anchor)`);
     }
     values[key] = value;
   }

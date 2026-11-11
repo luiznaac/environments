@@ -44,6 +44,20 @@ instantiate:
   lane: frontend
   check: npm ci && npm run check
   values:
+    port:
+      default: "8080"
+      replacements:
+        .env.example:
+          - VITE_API_TARGET=http://localhost:{{value}}
+        vite.config.ts:
+          - 'VITE_API_TARGET ?? "http://localhost:{{value}}"'
+    frontendDevPort:
+      default: "5273"
+      replacements:
+        .env.example:
+          - FRONTEND_DEV_PORT={{value}}
+        vite.config.ts:
+          - "FRONTEND_DEV_PORT ?? {{value}}"
     basePath:
       # The override is the complete base path (`/` + project + `/`).
       style: whole

@@ -5,6 +5,9 @@
 # template-propagate"). The watchlist is deliberately curated, not a full tree.
 entries:
   .env.example: judgment
+  # A lane's compose diverges structurally (extra services, volumes, deploy bits); a scaffold
+  # change here is a porting judgment, never an overwrite.
+  docker-compose.yml: judgment
   .pre-commit-config.yaml: judgment
   # A lane rewrites the guide for its project; a scaffold change here is a porting judgment.
   AGENTS.md: judgment
@@ -51,13 +54,25 @@ instantiate:
       default: "8080"
       replacements:
         .env.example:
-          - "8080"
-        Dockerfile:
-          - "8080"
-        pyproject.toml:
-          - --port 8080
+          - HTTP_PORT={{value}}
+          - GATEWAYS__APP__HOST=http://localhost:{{value}}
         src/template/application/settings.py:
-          - "8080"
+          - "http_port: int = {{value}}"
+        # The unit test that pins the canonical dev default.
+        tests/unit/test_app_host.py:
+          - "settings.http_port == {{value}}"
+    mysqlPort:
+      default: "3306"
+      replacements:
+        .env.example:
+          - MYSQL__PORT={{value}}
+        src/template/application/settings.py:
+          - "port: int = {{value}}"
+        # The host side of the publish mapping; the container side stays fixed at 3306.
+        docker-compose.yml:
+          - "MYSQL__PORT:-{{value}}}:3306"
+        tests/unit/test_app_host.py:
+          - "settings.mysql.port == {{value}}"
     image:
       # The override is the complete image reference (`luiznaac/<project>-python`).
       style: whole
