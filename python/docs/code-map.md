@@ -44,13 +44,13 @@ The layers are one package, `src/template/`, with one sub-package each; `import-
 **Files**: `src/template/application/{settings,container,boot}.py`
 **Seam(s)**:
 - **Composition seam** — `Container.__init__` builds the engine, HTTP client, checkers and controllers; adding a checker or endpoint is writing the class and adding one line there.
-- **Config seam** — `Settings` (pydantic-settings) reads `APP_ENV`, `HTTP_PORT`, `MYSQL__*` and `GATEWAYS__APP__HOST`; nested env vars use `__` as the delimiter.
-- **Entry seam** — `boot.py` exposes `app` (the uvicorn import target) and `main()`; tests build their own `Container` with fakes and a `FixedClock`.
+- **Config seam** — `Settings` (pydantic-settings) reads `APP_ENV`, `HTTP_PORT`, `MYSQL__*` and `GATEWAYS__APP__HOST`; nested env vars use `__` as the delimiter. `Settings.app_host` derives the self-health base URL from `HTTP_PORT` unless `GATEWAYS__APP__HOST` is set explicitly.
+- **Entry seam** — `boot.py` exposes `app` (the uvicorn import target) and `main()`, which serves on `HTTP_PORT` with reload only in `dev`; tests build their own `Container` with fakes and a `FixedClock`.
 
 ### `tests/` — the two test lanes
 **Purpose**: unit specs (no Docker) and integration specs that boot the real app against a real MySQL.
-**Files**: `tests/conftest.py`; `tests/unit/test_app_health_gateway.py`; `tests/integration/conftest.py`; `tests/integration/test_health.py`
-**Seam(s)**: `tests/integration/conftest.py` starts MySQL through Testcontainers and drives the real app in-process over ASGI; unit specs construct fakes directly. Put a shared builder next to `tests/conftest.py` rather than copying fixtures per spec. `uv run poe check` is the Docker-free fast gate; the integration lane runs in CI.
+**Files**: `tests/conftest.py`; `tests/unit/{test_app_health_gateway,test_app_host,test_boot}.py`; `tests/integration/conftest.py`; `tests/integration/test_health.py`
+**Seam(s)**: `tests/integration/conftest.py` starts MySQL through Testcontainers and drives the real app in-process over ASGI; unit specs construct fakes directly. The self-health base-URL derivation is pinned in `tests/unit/test_app_host.py`, and the module entrypoint's configured port and dev-only reload in `tests/unit/test_boot.py`. Put a shared builder next to `tests/conftest.py` rather than copying fixtures per spec. `uv run poe check` is the Docker-free fast gate; the integration lane runs in CI.
 
 ### Repo root — packaging, deploy, CI
 **Purpose**: the toolchain, configuration and container story around the package.

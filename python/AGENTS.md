@@ -67,8 +67,9 @@ Alembic's own files (`alembic.ini`, `alembic/env.py`, `alembic/script.py.mako`, 
 Kotest (`pytest`), fixtures in `tests/fixtures.py`. Tests live in `tests/unit/` (no Docker) and `tests/integration/` (spins MySQL via Testcontainers).
 
 ```bash
-uv run poe test              # unit tests only
-uv run poe test:integration  # integration tests
+uv run poe test-unit        # unit tests only (no Docker)
+uv run poe test-integration # integration tests (needs a Docker daemon)
+uv run poe test             # everything
 ```
 
 ## Code style / checks
@@ -81,23 +82,43 @@ uv run poe test:integration  # integration tests
 
 ## Configuration
 
-`src/template/application/settings.py` (pydantic-settings, `APP_ENV` profile):
+`src/template/application/settings.py` (pydantic-settings, `APP_ENV` profile). Every value has a default; a gitignored `.env` may override locally (see `.env.example`). Nested env vars use `__`:
 
-| Key | Source | Notes |
+| Key | Env var | Default |
 |---|---|---|
-| `mysql.host` / `mysql.user` / `mysql.password` | `MYSQL_HOST` / `MYSQL_USER` / `MYSQL_PASSWORD` | required, no defaults |
-| `app_env` | `APP_ENV` | defaults to `development` |
+| `app_env` | `APP_ENV` | `dev` |
+| `http_port` | `HTTP_PORT` | `8080` |
+| `log_level` | `LOG_LEVEL` | `INFO` |
+| `mysql.host` | `MYSQL__HOST` | `localhost` |
+| `mysql.port` | `MYSQL__PORT` | `3306` |
+| `mysql.user` | `MYSQL__USER` | `root` |
+| `mysql.password` | `MYSQL__PASSWORD` | empty |
+| `mysql.database` | `MYSQL__DATABASE` | `template` |
+| `gateways.app.host` | `GATEWAYS__APP__HOST` | unset — derived from `HTTP_PORT` |
 
-Use `${VAR}` (required) or `${VAR:default}` (optional) for env var substitution.
+`Settings.app_host` is what the composition root hands `AppHealthGateway`: an explicit `GATEWAYS__APP__HOST` wins (container/deploy), otherwise the self-health URL follows `HTTP_PORT`.
+
+### Ports (canonical family table)
+
+Only `api` and `mysql` apply to this scaffold; `web` and `frontend-dev` belong to a generated project's root compose and `frontend/`.
+
+| Role | Host env key | Scaffold default | Container-internal |
+|---|---|---|---|
+| `api` | `HTTP_PORT` | `8080` | `8080` (uvicorn, `Dockerfile` `EXPOSE`) |
+| `web` | `WEB_HOST_PORT` (generated root compose only) | `8081` | `8081` |
+| `mysql` | `MYSQL__PORT` | `3306` | `3306` |
+| `frontend-dev` | `FRONTEND_DEV_PORT` (react / generated `frontend/`) | `5273` | — |
+
+Only the published side of a compose mapping reads `.env`; container-internal ports stay fixed. A generated project replaces these defaults with its assigned block. The DB port recipe is `docker compose port mysql 3306`.
 
 ## Build, run, deploy
 
 ```bash
-uv run poe check      # lint, type check, test
-uv run poe test       # unit tests
+uv run poe check      # lint, format, typecheck, contracts, unit tests
+uv run poe test       # all tests (integration needs Docker)
 ```
 
-Local dev: `docker compose up -d mysql` (or `uv run poe db`) starts MySQL, then `uv run poe serve` starts the dev server. Point `MYSQL_HOST=localhost`, `MYSQL_USER=root`, `MYSQL_PASSWORD=` (dev defaults in `settings.py`).
+Local dev: `docker compose up -d mysql` starts MySQL on host `3306` (or `$MYSQL__PORT`), then `uv run poe run` serves the API on `$HTTP_PORT` (default `8080`, reload in `dev`). `MYSQL__HOST`/`MYSQL__USER`/`MYSQL__PASSWORD`/`MYSQL__DATABASE` default in `settings.py`; a gitignored `.env` overrides them.
 
 Git/PR conventions: see `salgadinhos/global/AGENTS.md`.
 

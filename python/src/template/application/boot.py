@@ -32,6 +32,7 @@ def main() -> None:
         "template.application.boot:app",
         host="0.0.0.0",  # containerised service
         port=settings.http_port,
+        reload=settings.is_dev,
     )
 
 
