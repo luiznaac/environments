@@ -149,8 +149,30 @@ Search for an existing spec and an existing fixture **before creating a new one*
 | `ktor.port` | `KTOR_PORT` | defaults to `8080` |
 | `ktor.wait` | fixed `true` | blocks main thread on the embedded server |
 | `mysql.host` / `mysql.user` / `mysql.password` | `MYSQL_HOST` / `MYSQL_USER` / `MYSQL_PASSWORD` | required, no defaults |
+| `mysql.port` | `MYSQL_PORT` | defaults to `3306`; the standalone `migrate()` path (`MysqlEnv`) reads the same variable with the same fallback |
 
 Use `${VAR}` (required) or `${VAR:default}` (optional) for env var substitution.
+
+## Ports
+
+Local-dev host ports follow the family's canonical block roles. This scaffold binds the API and
+MySQL roles; `web` and `frontend-dev` belong to generated projects (the combined web image and the
+Vite frontend), and the scaffold has neither.
+
+| Role | Offset | Host env key | Canonical default | Container-internal |
+|---|---|---|---|---|
+| `api` | `+0` | `KTOR_PORT` | `8080` | `8080` |
+| `web` | `+1` | — (generated root compose) | `8081` | `8081` |
+| `mysql` | `+2` | `MYSQL_PORT` | `3306` | `3306` |
+| `frontend-dev` | `+3` | — (react lane) | `5273` | — |
+
+The offsets index a generated project's block, not the scaffold defaults (which are not themselves
+a contiguous block). A fresh clone with no `.env` binds those defaults with no further port
+configuration: `docker compose up -d mysql` publishes MySQL on host `3306`, and the app listens on
+`8080` once the required `MYSQL_HOST` / `MYSQL_USER` / `MYSQL_PASSWORD` are set (see
+Configuration). A sourced `.env`, or the same variables set in the run config, may override either
+port; the container-internal ports never move. The host port MySQL actually publishes is `docker
+compose port mysql 3306`.
 
 ## Build, run, deploy
 
@@ -202,7 +224,7 @@ On Windows the socket mount is `//var/run/docker.sock:/var/run/docker.sock`. The
 - **`integrationTest` is local-only and never "passes" when it didn't run.** It depends on Testcontainers reaching the host daemon (`DockerComposeExtension` boots MySQL), so a suite that was skipped or failed for the environment is reported as **"não executado"**, never as green. With Docker down, `build` fails in the `integrationTest` module — that is a *local environment* failure, not a code failure. Don't chase it in the diff; start Docker.
 - **A green `unitTest` or `test` is not a green `build`.** `./gradlew test` runs the `integrationTest` module too, but neither it nor the Docker-free `unitTest` lane runs detekt or packaging. `unitTest` is the right stage to repeat while working; it is the wrong one to quote as "it passes".
 
-Local dev: `docker compose up -d mysql` (or root-level `npm run db`) starts MySQL only, then run via IntelliJ config in `.run/` with `MYSQL_HOST=localhost`, `MYSQL_USER=root`, `MYSQL_PASSWORD=` (dev defaults in `application.yaml`).
+Local dev: `docker compose up -d mysql` starts MySQL only, then run via the checked-in IntelliJ config in `.run/`, which supplies `MYSQL_HOST=localhost`, `MYSQL_USER=root`, `MYSQL_PASSWORD=`; the ports default in `application.yaml`.
 
 Docker: repo-root `Dockerfile` is a multi-stage build (Gradle → `openjdk:21-slim` runtime) that ships backend only (no frontend in this template). `docker-compose.yml` at the root adds MySQL for full-stack runs.
 

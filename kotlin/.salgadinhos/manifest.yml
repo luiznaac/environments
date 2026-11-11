@@ -56,7 +56,7 @@ instantiate:
         docker-compose.yml:
           - MYSQL_DATABASE=template
         persistence/src/main/kotlin/dev/agner/template/persistence/configuration/DatabaseConfig.kt:
-          - 3306/template
+          - database = "template"
         persistence/src/main/kotlin/dev/agner/template/persistence/migration/Migrator.kt:
           - '?: "template"'
         integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/DockerComposeExtension.kt:
@@ -64,7 +64,7 @@ instantiate:
           - 'table" template;'
           - 'database = "template"'
         integrationTest/src/test/kotlin/dev/agner/template/integrationTest/tests/MigrationSchemaTest.kt:
-          - 3306/template
+          - /template
     port:
       default: "8080"
       replacements:
