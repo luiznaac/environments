@@ -13,6 +13,7 @@ dependencies {
     testImplementation(libs.ktor.client.core)
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.mysql)
     testImplementation(libs.wiremock)
     implementation(libs.jackson.kotlin)
     // Same reason: the test calls Database.connect/transaction/MigrationUtils directly.

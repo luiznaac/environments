@@ -24,6 +24,21 @@ entries:
   gradle/libs.versions.toml:
     class: pinned
     # No `pins` list: a version catalog compares every `[versions]` alias.
+  # The integration harness is infrastructure each lane adapts (container image, stubs, helpers):
+  # a scaffold change here is a porting judgment, never an overwrite.
+  integrationTest/build.gradle.kts: judgment
+  integrationTest/src/test/resources/application-test.yaml: judgment
+  integrationTest/src/test/resources/mysql-test-conf/my.cnf: judgment
+  integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/ClockMock.kt: judgment
+  integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/HttpMockService.kt: judgment
+  integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/HttpRequestService.kt: judgment
+  integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/IntegrationTest.kt: judgment
+  integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/KotestConfig.kt: judgment
+  integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/MySqlContainerExtension.kt: judgment
+  integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/ResetWiremock.kt: judgment
+  integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/StopKtorServer.kt: judgment
+  integrationTest/src/test/kotlin/dev/agner/template/integrationTest/tests/HarnessContractTest.kt: judgment
+  integrationTest/src/test/kotlin/dev/agner/template/integrationTest/tests/MigrationSchemaTest.kt: judgment
 
 # The verification ladder's first two rungs: compile first (allWarningsAsErrors makes the
 # compiler the strictest gate), then detekt for the configs this manifest watches.
@@ -45,6 +60,7 @@ instantiate:
   # `clean build` includes the Docker-backed integration suite, like CI.
   check: ./gradlew clean build
   keep:
+    - .salgadinhos/manifest.yml
     - config/detekt/config.yml
     - gradlew
     - gradlew.bat
@@ -55,24 +71,18 @@ instantiate:
           - MYSQL_DATABASE=template
         docker-compose.yml:
           - MYSQL_DATABASE=template
-        persistence/src/main/kotlin/dev/agner/template/persistence/configuration/DatabaseConfig.kt:
-          - database = "template"
+        application/src/main/resources/application.yaml:
+          - MYSQL_DATABASE:template
         persistence/src/main/kotlin/dev/agner/template/persistence/migration/Migrator.kt:
           - '?: "template"'
-        integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/DockerComposeExtension.kt:
-          - "show tables' template"
-          - 'table" template;'
-          - 'database = "template"'
-        integrationTest/src/test/kotlin/dev/agner/template/integrationTest/tests/MigrationSchemaTest.kt:
-          - /template
+        integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/MySqlContainerExtension.kt:
+          - 'withDatabaseName("template")'
     port:
       default: "8080"
       replacements:
         .env.example:
           - "8080"
         application/src/main/resources/application.yaml:
-          - "8080"
-        integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/HttpRequestService.kt:
           - "8080"
     image:
       # The override is the complete image reference (`luiznaac/<project>`).

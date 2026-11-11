@@ -2,13 +2,19 @@ package dev.agner.template.integrationTest.config
 
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.client.WireMock
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration.options
 import com.github.tomakehurst.wiremock.http.RequestMethod
 import dev.agner.template.usecase.configuration.JsonMapper
 
 object HttpMockService {
 
-    private val server = WireMockServer(3000)
+    private val server = WireMockServer(options().dynamicPort())
     private val mapper = JsonMapper.jsonAdapter()
+
+    // The port is whatever the OS handed out for this run, so two concurrent suites never
+    // contend and a busy host port cannot fail the harness.
+    val baseUrl: String
+        get() = server.baseUrl()
 
     init {
         server.start()

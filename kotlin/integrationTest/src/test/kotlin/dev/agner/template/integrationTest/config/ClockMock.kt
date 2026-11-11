@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.stereotype.Component
 import java.time.Clock
+import java.time.Instant
 import java.time.ZoneId
 
 @Component
@@ -13,6 +14,7 @@ object ClockMock {
 
     val clock = mockk<Clock> {
         every { zone } returns ZoneId.systemDefault()
+        every { instant() } answers { Instant.now() }
     }
 
     @Bean

@@ -7,3 +7,4 @@ mysql:
   port: ${MYSQL_PORT:3306}
   user: ${MYSQL_USER}
   password: ${MYSQL_PASSWORD}
+  database: ${MYSQL_DATABASE:template}
