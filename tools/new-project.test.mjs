@@ -18,6 +18,7 @@ import { spawnSync } from "node:child_process";
 import { ConfigError, loadManifest, parseYamlLite } from "./template-check.mjs";
 import {
   applyValueOverrides,
+  fillValue,
   findTokenLeftovers,
   replaceJsonTokenValues,
   resolveCheckCommand,
@@ -124,6 +125,10 @@ test("loadManifest: malformed instantiate fields are config errors", () => {
     ["values:\n    port:\n      replacements:\n        app.yaml:\n          - key: value", /'instantiate\.values\.port\.replacements\.app\.yaml' must be a list of strings/],
     ["values:\n    port:\n      default: '8080'", /'instantiate\.values\.port' needs 'replacements'/],
     ["values:\n    port:\n      replacements: {}", /'instantiate\.values\.port' needs 'replacements'/],
+    [
+      "values:\n    mysqlPort:\n      replacements:\n        app.yaml:\n          - '{{value}}:3306'",
+      /'instantiate\.values\.mysqlPort' uses '\{\{value\}\}' but declares no 'default'/,
+    ],
   ];
   for (const [body, pattern] of cases) {
     const path = manifest(`instantiate:\n  name: template\n  ${body}\n`);
@@ -244,6 +249,43 @@ test("applyValueOverrides: no overrides means no writes", () => {
   });
   assert.deepEqual(applied, []);
   assert.equal(readFileSync(join(root, "application.yaml"), "utf8"), "ktor:\n  port: 8080\n");
+});
+
+test("applyValueOverrides: {{value}} in a literal keeps the surrounding context", () => {
+  const root = makeTree({ "docker-compose.yml": 'services:\n  mysql:\n    ports:\n      - "3306:3306"\n' });
+  const applied = applyValueOverrides(root, {
+    token: "template",
+    values: { mysqlPort: { default: "3306", replacements: { "docker-compose.yml": ['"{{value}}:3306"'] } } },
+    overrides: { mysqlPort: "8112" },
+  });
+  assert.deepEqual(applied, ["mysqlPort"]);
+  assert.equal(
+    readFileSync(join(root, "docker-compose.yml"), "utf8"),
+    'services:\n  mysql:\n    ports:\n      - "8112:3306"\n',
+  );
+});
+
+test("applyValueOverrides: a literal without {{value}} still replaces wholesale", () => {
+  const root = makeTree({ "app.env": "API=8080\nPROXY=http://localhost:8080\n" });
+  applyValueOverrides(root, {
+    token: "template",
+    values: { port: { default: "8080", replacements: { "app.env": ["8080"] } } },
+    overrides: { port: "8110" },
+  });
+  assert.equal(readFileSync(join(root, "app.env"), "utf8"), "API=8110\nPROXY=http://localhost:8110\n");
+});
+
+test("applyValueOverrides: port values run before the other values", () => {
+  const root = makeTree({ "migration.kt": "jdbc:mysql://localhost:3306/template\n" });
+  applyValueOverrides(root, {
+    token: "template",
+    values: {
+      db: { replacements: { "migration.kt": ["/template"] } },
+      mysqlPort: { default: "3306", replacements: { "migration.kt": ["{{value}}/template"] } },
+    },
+    overrides: { db: "widget_db", mysqlPort: "8112" },
+  });
+  assert.equal(readFileSync(join(root, "migration.kt"), "utf8"), "jdbc:mysql://localhost:8112/widget_db\n");
 });
 
 test("applyValueOverrides: whole-style values replace the literal entirely", () => {
@@ -505,6 +547,55 @@ test("cli: a lane compose with a long-form published port is a collision too", (
   assert.match(refused.stderr, /mono/);
 });
 
+test("cli: a port literal carrying the token is substituted before the name pass", () => {
+  const fix = miniCodeRoot({
+    manifest: `
+entries: {}
+instantiate:
+  name: template
+  lane: backend
+  values:
+    db:
+      replacements:
+        conn.txt:
+          - /template
+    mysqlPort:
+      default: "3306"
+      replacements:
+        conn.txt:
+          - "{{value}}/template"
+`,
+    files: { "conn.txt": "jdbc:mysql://localhost:3306/template\n" },
+  });
+  const result = runCli(fix.root, createArgs(fix, ["--db", "widget_db", "--mysql-port", "8112", "--skip-check", "--skip-guard"]));
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    readFileSync(join(fix.root, "widget", "backend", "conn.txt"), "utf8"),
+    "jdbc:mysql://localhost:8112/widget_db\n",
+  );
+});
+
+test("cli: a non-numeric port role override is refused", () => {
+  const fix = miniCodeRoot({
+    manifest: `
+entries: {}
+instantiate:
+  name: template
+  lane: backend
+  values:
+    mysqlPort:
+      default: "3306"
+      replacements:
+        conn.txt:
+          - "{{value}}"
+`,
+    files: { "conn.txt": "3306\n" },
+  });
+  const result = runCli(fix.root, createArgs(fix, ["--mysql-port", "abc", "--skip-check", "--skip-guard"]));
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /--mysql-port must be a number/);
+});
+
 test("cli: installs the master guard through salgadinhos' installer after the commit", () => {
   const installer = 'import { writeFileSync } from "node:fs";\nwriteFileSync("ran.txt", process.argv.slice(2).join(" "));\n';
   const fix = miniCodeRoot({ installer });
@@ -530,24 +621,66 @@ test("committed manifests: the live scaffolds declare the creation data", () => 
   assert.equal(kotlin.lane, "backend");
   assert.equal(kotlin.check, "./gradlew clean build");
   assert.deepEqual(kotlin.keep, [".salgadinhos/manifest.yml", "config/detekt/config.yml", "gradlew", "gradlew.bat"]);
-  assert.deepEqual(Object.keys(kotlin.values).sort(), ["db", "image", "port"]);
+  assert.deepEqual(Object.keys(kotlin.values).sort(), ["db", "image", "mysqlPort", "port"]);
   assert.deepEqual(kotlin.values.db.replacements[".env.example"], ["MYSQL_DATABASE=template"]);
-  assert.deepEqual(kotlin.values.port.replacements[".env.example"], ["8080"]);
+  assert.equal(kotlin.values.port.default, "8080");
+  assert.equal(kotlin.values.mysqlPort.default, "3306");
   assert.equal(kotlin.values.image.style, "whole", "the image override is the full image reference");
 
   const python = loadManifest(join(REPO_ROOT, "python", ".salgadinhos", "manifest.yml")).instantiate;
   assert.equal(python.lane, "backend");
   assert.equal(python.check, "uv run poe check");
   assert.deepEqual(python.keep, []);
-  assert.deepEqual(Object.keys(python.values).sort(), ["db", "image", "port"]);
+  assert.deepEqual(Object.keys(python.values).sort(), ["db", "image", "mysqlPort", "port"]);
+  assert.equal(python.values.port.default, "8080");
+  assert.equal(python.values.mysqlPort.default, "3306");
   assert.equal(python.values.image.style, "whole");
 
   const react = loadManifest(join(REPO_ROOT, "react", ".salgadinhos", "manifest.yml")).instantiate;
   assert.equal(react.lane, "frontend");
   assert.equal(react.check, "npm ci && npm run check");
   assert.deepEqual(react.keep, []);
-  assert.deepEqual(Object.keys(react.values), ["basePath"]);
+  assert.deepEqual(Object.keys(react.values), ["port", "frontendDevPort", "basePath"]);
+  assert.equal(react.values.port.default, "8080");
+  assert.equal(react.values.frontendDevPort.default, "5273");
   assert.equal(react.values.basePath.style, "whole", "the base path override is the full path");
+});
+
+test("committed manifests: compose and env files are judgment entries and stale literals are gone", () => {
+  for (const stack of ["kotlin", "python"]) {
+    const manifest = loadManifest(join(REPO_ROOT, stack, ".salgadinhos", "manifest.yml"));
+    assert.equal(manifest.entries["docker-compose.yml"].class, "judgment", `${stack}: compose is a judgment entry`);
+    assert.equal(manifest.entries[".env.example"].class, "judgment", `${stack}: the env example is a judgment entry`);
+  }
+  const kotlin = loadManifest(join(REPO_ROOT, "kotlin", ".salgadinhos", "manifest.yml")).instantiate;
+  assert.ok(
+    !("integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/HttpRequestService.kt" in
+      kotlin.values.port.replacements),
+    "the harness derives its port now, so the HttpRequestService literal is gone",
+  );
+  const python = loadManifest(join(REPO_ROOT, "python", ".salgadinhos", "manifest.yml")).instantiate;
+  assert.ok(!("Dockerfile" in python.values.port.replacements), "the container-internal Dockerfile port is gone");
+  assert.ok(!("pyproject.toml" in python.values.port.replacements), "the stale pyproject --port literal is gone");
+});
+
+test("committed manifests: every declared literal exists in the file it names", () => {
+  for (const stack of ["kotlin", "python", "react"]) {
+    const { values } = loadManifest(join(REPO_ROOT, stack, ".salgadinhos", "manifest.yml")).instantiate;
+    for (const [key, spec] of Object.entries(values)) {
+      for (const [file, literals] of Object.entries(spec.replacements)) {
+        const abs = join(REPO_ROOT, stack, file);
+        assert.ok(existsSync(abs), `${stack}: values.${key} names a missing file ${file}`);
+        const text = readFileSync(abs, "utf8");
+        for (const literal of literals) {
+          const searchable =
+            literal.includes("{{value}}") && spec.default !== undefined
+              ? fillValue(literal, spec.default)
+              : literal;
+          assert.ok(text.includes(searchable), `${stack}: values.${key} declares '${literal}', absent from ${file}`);
+        }
+      }
+    }
+  }
 });
 
 test("real scaffold: kotlin creates a renamed lane with the manifest copy and the sentinel", () => {
@@ -606,4 +739,62 @@ test("real scaffold: react creates a renamed lane with scoped dependency metadat
     "the generated lane carries the sandbox install command",
   );
   assert.equal(readFileSync(join(root, "widget", ".salgadinhos", "frontend.yml"), "utf8").includes("source: react"), true);
+});
+
+test("real scaffold: kotlin takes --port and --mysql-port into every host-side literal", () => {
+  const root = realCodeRoot();
+  const result = runCli(root, [
+    "--code-root", root, "--stack", "kotlin", "--name", "widget",
+    "--port", "8110", "--mysql-port", "8112", "--skip-check", "--skip-guard",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const lane = join(root, "widget", "backend");
+  const env = readFileSync(join(lane, ".env.example"), "utf8");
+  assert.match(env, /^KTOR_PORT=8110$/m);
+  assert.match(env, /^MYSQL_PORT=8112$/m);
+  const app = readFileSync(join(lane, "application", "src", "main", "resources", "application.yaml"), "utf8");
+  assert.match(app, /\$\{KTOR_PORT:8110\}/);
+  assert.match(app, /\$\{MYSQL_PORT:8112\}/);
+  assert.match(readFileSync(join(lane, "docker-compose.yml"), "utf8"), /\$\{MYSQL_PORT:-8112\}:3306/);
+  const endpoint = join(lane, "persistence", "src", "main", "kotlin", "dev", "agner", "widget", "persistence", "configuration", "MySqlEndpoint.kt");
+  assert.match(readFileSync(endpoint, "utf8"), /DEFAULT_MYSQL_PORT = 8112/);
+  const endpointTest = join(lane, "persistence", "src", "test", "kotlin", "dev", "agner", "widget", "persistence", "configuration", "MySqlEndpointTest.kt");
+  assert.match(readFileSync(endpointTest, "utf8"), /shouldBe 8112/);
+});
+
+test("real scaffold: python takes --port and --mysql-port into every host-side literal", () => {
+  const root = realCodeRoot();
+  const result = runCli(root, [
+    "--code-root", root, "--stack", "python", "--name", "widget",
+    "--port", "8130", "--mysql-port", "8132", "--skip-check", "--skip-guard",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const lane = join(root, "widget", "backend");
+  const env = readFileSync(join(lane, ".env.example"), "utf8");
+  assert.match(env, /^HTTP_PORT=8130$/m);
+  assert.match(env, /^MYSQL__PORT=8132$/m);
+  assert.match(env, /GATEWAYS__APP__HOST=http:\/\/localhost:8130/);
+  const settings = readFileSync(join(lane, "src", "widget", "application", "settings.py"), "utf8");
+  assert.match(settings, /http_port: int = 8130/);
+  assert.match(settings, /port: int = 8132/);
+  assert.match(readFileSync(join(lane, "docker-compose.yml"), "utf8"), /\$\{MYSQL__PORT:-8132\}:3306/);
+  const testHost = readFileSync(join(lane, "tests", "unit", "test_app_host.py"), "utf8");
+  assert.match(testHost, /settings.http_port == 8130/);
+  assert.match(testHost, /settings.mysql.port == 8132/);
+});
+
+test("real scaffold: react takes --port and --frontend-dev-port into the Vite config", () => {
+  const root = realCodeRoot();
+  const result = runCli(root, [
+    "--code-root", root, "--stack", "react", "--name", "widget",
+    "--port", "8110", "--frontend-dev-port", "8113", "--skip-check", "--skip-guard",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const lane = join(root, "widget", "frontend");
+  const env = readFileSync(join(lane, ".env.example"), "utf8");
+  assert.match(env, /VITE_API_TARGET=http:\/\/localhost:8110/);
+  assert.match(env, /^FRONTEND_DEV_PORT=8113$/m);
+  const vite = readFileSync(join(lane, "vite.config.ts"), "utf8");
+  assert.match(vite, /FRONTEND_DEV_PORT \?\? 8113/);
+  assert.match(vite, /VITE_API_TARGET \?\? "http:\/\/localhost:8110"/);
 });
