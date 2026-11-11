@@ -17,9 +17,16 @@ import { spawnSync } from "node:child_process";
 
 import { ConfigError, loadManifest, parseYamlLite } from "./template-check.mjs";
 import {
+  allocateBlock,
   applyValueOverrides,
+  blockForBase,
+  blocksInUse,
   fillValue,
   findTokenLeftovers,
+  parseDockerPorts,
+  parseNetstatListeners,
+  parseProcNetTcp,
+  portsFromText,
   replaceJsonTokenValues,
   resolveCheckCommand,
   rewriteProjectManifest,
@@ -326,6 +333,72 @@ test("sentinelText: stamps source, lane and the creation revision with the scaff
 });
 
 // ---------------------------------------------------------------------------
+// Port block allocator: the pure range seam
+// ---------------------------------------------------------------------------
+
+test("blockForBase: the four roles are base+0..+3", () => {
+  assert.deepEqual(blockForBase(8110), { api: 8110, web: 8111, mysql: 8112, frontendDev: 8113 });
+});
+
+test("allocateBlock: the lowest fully free base wins", () => {
+  assert.deepEqual(allocateBlock(new Set()), blockForBase(8100));
+  assert.deepEqual(allocateBlock(new Set([8100, 8101, 8102])), blockForBase(8110));
+});
+
+test("allocateBlock: any of the ten offsets occupies the whole block", () => {
+  for (let offset = 0; offset < 10; offset++) {
+    assert.deepEqual(allocateBlock(new Set([8100 + offset])), blockForBase(8110), `offset ${offset}`);
+  }
+  assert.deepEqual(allocateBlock(new Set([8109])), blockForBase(8110), "a reserved offset still occupies the block");
+  assert.deepEqual(allocateBlock(new Set([8104])), blockForBase(8110), "a reserved offset still occupies the block");
+});
+
+test("allocateBlock: exhaustion returns null and blocksInUse names every occupied base", () => {
+  const everything = new Set();
+  for (let port = 8100; port <= 8299; port++) everything.add(port);
+  assert.equal(allocateBlock(everything), null);
+  const bases = blocksInUse(everything);
+  assert.equal(bases.length, 20);
+  assert.deepEqual(bases.slice(0, 3), [8100, 8110, 8120]);
+  assert.deepEqual(bases.slice(-1), [8290]);
+});
+
+test("portsFromText: only integer tokens inside 8100-8299 are occupancy", () => {
+  const ports = portsFromText("Ktor 8100 and 8299, also 8099, 8300, 18100 and 8100.5\n");
+  assert.deepEqual([...ports].sort((a, b) => a - b), [8100, 8299]);
+  assert.deepEqual([...portsFromText("PORT_8100 PORT_8300")], [8100], "an underscore-adjacent literal still counts");
+});
+
+test("parseProcNetTcp: only LISTEN sockets in the hex local address count", () => {
+  const text = [
+    "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+    "   0: 00000000:1FA4 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1",
+    "   1: 0100007F:1FB0 0100007F:D431 01 00000000:00000000 00:00000000 00000000 1000        0 23456 1",
+  ].join("\n");
+  assert.deepEqual([...parseProcNetTcp(text)], [8100]);
+});
+
+test("parseNetstatListeners: reads the local address of each LISTEN row, macOS and Windows shapes", () => {
+  const mac = [
+    "tcp4       0      0  127.0.0.1.8100         *.*                    LISTEN",
+    "tcp6       0      0  ::1.8110               *.*                    LISTEN",
+    "tcp4       0      0  10.0.0.1.5273          10.0.0.2.55555         ESTABLISHED",
+  ].join("\n");
+  assert.deepEqual([...parseNetstatListeners(mac)].sort((a, b) => a - b), [8100, 8110]);
+  const windows = [
+    "  TCP    0.0.0.0:8100           0.0.0.0:0              LISTENING       4",
+    "  TCP    [::]:8110              [::]:0                 LISTENING       4",
+    "  TCP    10.0.0.1:5273          10.0.0.2:55555         ESTABLISHED     9",
+  ].join("\n");
+  assert.deepEqual([...parseNetstatListeners(windows)].sort((a, b) => a - b), [8100, 8110]);
+});
+
+test("parseDockerPorts: the published side of each mapping is occupancy", () => {
+  const text = "0.0.0.0:8100->8080/tcp, :::8100->8080/tcp, 0.0.0.0:8122->3306/tcp\n";
+  assert.deepEqual([...parseDockerPorts(text)].sort((a, b) => a - b), [8100, 8122]);
+});
+
+// ---------------------------------------------------------------------------
 // CLI: creation end to end (fixture stack)
 // ---------------------------------------------------------------------------
 
@@ -349,6 +422,16 @@ instantiate:
       replacements:
         port.txt:
           - "8080"
+    mysqlPort:
+      default: "3306"
+      replacements:
+        mysql.txt:
+          - "mysql {{value}}"
+    frontendDevPort:
+      default: "5273"
+      replacements:
+        fdev.txt:
+          - "fdev {{value}}"
 `;
 
 const MINI_FILES = {
@@ -356,6 +439,8 @@ const MINI_FILES = {
   "src/template/util/helper.py": "helper for template\n",
   "db.txt": "MYSQL_DATABASE=template\n",
   "port.txt": "port 8080\n",
+  "mysql.txt": "mysql 3306\n",
+  "fdev.txt": "fdev 5273\n",
   "gradlew": "generated from the Groovy template\n",
   "package.json": JSON.stringify(
     { name: "template-fe", dependencies: { "@babel/template": "^7.29.7", react: "^19.0.0" } },
@@ -390,7 +475,10 @@ function miniCodeRoot({ manifest: manifestText = MINI_MANIFEST, files = MINI_FIL
   };
   write("environments/mini/.salgadinhos/manifest.yml", manifestText);
   for (const [rel, content] of Object.entries(files)) write(`environments/mini/${rel}`, content);
-  for (const [name, content] of Object.entries(siblings)) write(`${name}/docker-compose.yml`, content);
+  for (const [name, content] of Object.entries(siblings)) {
+    write(`${name}/docker-compose.yml`, content);
+    initGit(join(root, name));
+  }
   if (installer !== null) write("salgadinhos/adapters/install.mjs", installer);
   return { root, sha: initGit(join(root, "environments")) };
 }
@@ -526,25 +614,97 @@ test("cli: refuses a non-empty target unless --force", () => {
   assert.ok(existsSync(join(fix.root, "widget", "backend", "db.txt")));
 });
 
-test("cli: a host-port collision with a sibling app is refused unless --port overrides it", () => {
-  const fix = miniCodeRoot({ siblings: { other: 'services:\n  app:\n    ports:\n      - "8080:8080"\n' } });
-  const refused = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"]));
-  assert.equal(refused.status, 2);
-  assert.match(refused.stderr, /8080/);
-  assert.match(refused.stderr, /other/);
-  const chosen = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--port", "9000"]));
-  assert.equal(chosen.status, 0, chosen.stderr);
-  assert.equal(readFileSync(join(fix.root, "widget", "backend", "port.txt"), "utf8"), "port 9000\n");
+const readPorts = (root) => JSON.parse(readFileSync(join(root, "widget", ".salgadinhos", "ports.json"), "utf8"));
+
+test("cli: allocation writes all four explicit numbers into ports.json and the scaffold literals", () => {
+  const fix = miniCodeRoot();
+  const result = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"]));
+  assert.equal(result.status, 0, result.stderr);
+  const ports = readPorts(fix.root);
+  assert.deepEqual(Object.keys(ports), ["api", "web", "mysql", "frontendDev"]);
+  assert.equal(ports.web, ports.api + 1);
+  assert.equal(ports.mysql, ports.api + 2);
+  assert.equal(ports.frontendDev, ports.api + 3);
+  assert.ok(ports.api >= 8100 && ports.api <= 8290, `base in range, got ${ports.api}`);
+  const lane = join(fix.root, "widget", "backend");
+  assert.equal(readFileSync(join(lane, "port.txt"), "utf8"), `port ${ports.api}\n`);
+  assert.equal(readFileSync(join(lane, "mysql.txt"), "utf8"), `mysql ${ports.mysql}\n`);
+  assert.equal(readFileSync(join(lane, "fdev.txt"), "utf8"), `fdev ${ports.frontendDev}\n`);
+  assert.deepEqual(JSON.parse(git(join(fix.root, "widget"), ["show", "HEAD:.salgadinhos/ports.json"])), ports, "the record is committed");
 });
 
-test("cli: a lane compose with a long-form published port is a collision too", () => {
+test("cli: --base fills all four, and a role flag overrides its role", () => {
   const fix = miniCodeRoot();
-  const lane = join(fix.root, "mono", "backend");
-  mkdirSync(lane, { recursive: true });
-  writeFileSync(join(lane, "docker-compose.yml"), 'services:\n  db:\n    ports:\n      - published: "8080"\n');
-  const refused = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--base", "8220", "--skip-check", "--skip-guard"]));
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(readPorts(fix.root), { api: 8220, web: 8221, mysql: 8222, frontendDev: 8223 });
+  assert.equal(readFileSync(join(fix.root, "widget", "backend", "port.txt"), "utf8"), "port 8220\n");
+
+  const overridden = miniCodeRoot();
+  const mixed = runCli(
+    overridden.root,
+    createArgs(overridden, ["--base", "8230", "--web-port", "9000", "--mysql-port", "9001", "--frontend-dev-port", "9002", "--skip-check", "--skip-guard"]),
+  );
+  assert.equal(mixed.status, 0, mixed.stderr);
+  assert.deepEqual(readPorts(overridden.root), { api: 8230, web: 9000, mysql: 9001, frontendDev: 9002 });
+});
+
+test("cli: --port stays the API port and the rest of its block follows", () => {
+  const fix = miniCodeRoot();
+  const result = runCli(fix.root, createArgs(fix, ["--port", "8210", "--skip-check", "--skip-guard"]));
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(readPorts(fix.root), { api: 8210, web: 8211, mysql: 8212, frontendDev: 8213 });
+});
+
+test("cli: a later lane adopts ports.json and a contradictory explicit number refuses", () => {
+  const fix = miniCodeRoot();
+  assert.equal(runCli(fix.root, createArgs(fix, ["--base", "8240", "--skip-check", "--skip-guard"])).status, 0);
+  const adopted = runCli(fix.root, createArgs(fix, ["--lane", "frontend", "--force", "--skip-check", "--skip-guard"]));
+  assert.equal(adopted.status, 0, adopted.stderr);
+  assert.deepEqual(readPorts(fix.root), { api: 8240, web: 8241, mysql: 8242, frontendDev: 8243 });
+  assert.equal(readFileSync(join(fix.root, "widget", "frontend", "port.txt"), "utf8"), "port 8240\n");
+
+  const refused = runCli(fix.root, createArgs(fix, ["--lane", "frontend", "--force", "--mysql-port", "9000", "--skip-check", "--skip-guard"]));
   assert.equal(refused.status, 2);
-  assert.match(refused.stderr, /mono/);
+  assert.match(refused.stderr, /contradicts/);
+  assert.match(refused.stderr, /ports\.json/);
+
+  const matched = runCli(fix.root, createArgs(fix, ["--lane", "frontend", "--force", "--port", "8240", "--skip-check", "--skip-guard"]));
+  assert.equal(matched.status, 0, matched.stderr);
+});
+
+test("cli: --force never reallocates an already-recorded block", () => {
+  const fix = miniCodeRoot();
+  assert.equal(runCli(fix.root, createArgs(fix, ["--base", "8100", "--skip-check", "--skip-guard"])).status, 0);
+  // The block is now committed by a sibling, so a fresh allocation would have to move up.
+  const other = join(fix.root, "other");
+  mkdirSync(other, { recursive: true });
+  writeFileSync(join(other, "occupancy.txt"), "occupied: 8100 8101 8102 8103\n");
+  initGit(other);
+  const forced = runCli(fix.root, createArgs(fix, ["--force", "--skip-check", "--skip-guard"]));
+  assert.equal(forced.status, 0, forced.stderr);
+  assert.deepEqual(readPorts(fix.root), { api: 8100, web: 8101, mysql: 8102, frontendDev: 8103 });
+});
+
+test("cli: exhaustion aborts naming the range, the blocks in use and the override flags", () => {
+  const all = Array.from({ length: 200 }, (_, index) => 8100 + index).join(" ");
+  const fix = miniCodeRoot({ siblings: { other: `occupancy: ${all}\n` } });
+  const result = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"]));
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /8100.{0,4}8299/);
+  assert.match(result.stderr, /8100, 8110/);
+  assert.match(result.stderr, /--base/);
+  assert.match(result.stderr, /--port/);
+  assert.ok(!existsSync(join(fix.root, "widget", ".salgadinhos", "ports.json")), "no record is written on exhaustion");
+});
+
+test("cli: an explicit number overlapping a committed block warns and proceeds", () => {
+  const fix = miniCodeRoot({ siblings: { other: "occupancy: 8100 8101 8102 8103\n" } });
+  const result = runCli(fix.root, createArgs(fix, ["--port", "8100", "--skip-check", "--skip-guard"]));
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(`${result.stdout}${result.stderr}`, /8100/);
+  assert.match(`${result.stdout}${result.stderr}`, /overlap/i);
+  assert.deepEqual(readPorts(fix.root), { api: 8100, web: 8101, mysql: 8102, frontendDev: 8103 });
 });
 
 test("cli: a port literal carrying the token is substituted before the name pass", () => {
@@ -729,7 +889,10 @@ test("real scaffold: react creates a renamed lane with scoped dependency metadat
   assert.equal(JSON.parse(readFileSync(join(lane, "package-lock.json"), "utf8")).name, "widget-fe");
   assert.match(readFileSync(join(lane, "package-lock.json"), "utf8"), /"@babel\/template"/);
   assert.match(readFileSync(join(lane, "vite.config.ts"), "utf8"), /"\/widget\/"/);
-  assert.match(readFileSync(join(lane, ".env.example"), "utf8"), /VITE_API_TARGET=http:\/\/localhost:8080/);
+  const ports = JSON.parse(readFileSync(join(root, "widget", ".salgadinhos", "ports.json"), "utf8"));
+  const env = readFileSync(join(lane, ".env.example"), "utf8");
+  assert.match(env, new RegExp(`VITE_API_TARGET=http://localhost:${ports.api}`));
+  assert.match(env, new RegExp(`^FRONTEND_DEV_PORT=${ports.frontendDev}$`, "m"));
   assert.match(readFileSync(join(lane, "index.html"), "utf8"), /<title>widget<\/title>/);
   const agents = readFileSync(join(lane, "AGENTS.md"), "utf8");
   assert.ok(

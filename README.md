@@ -10,10 +10,10 @@ Scaffolds are instantiated by the `new-project` script, never hand-copied:
 
 ```bash
 node tools/new-project.mjs --stack kotlin --name <project> [--lane backend] [--port <n>]
-    [--mysql-port <n>] [--frontend-dev-port <n>]
+    [--web-port <n>] [--mysql-port <n>] [--frontend-dev-port <n>] [--base <n>]
 ```
 
-It copies the scaffold (propagation manifest included), applies the renames declared in the manifest's `instantiate:` section, stamps the lane sentinel, runs the scaffold's fast check and makes the first commit, then installs the master guard. The creation skill in the `salgadinhos` repo drives the parameters and the follow-up — remote repo, CI, secrets, domain, first deploy. See [AGENTS.md](AGENTS.md) → "Creation".
+It copies the scaffold (propagation manifest included), applies the renames declared in the manifest's `instantiate:` section, allocates a 10-port block (`8100–8299`) and commits its four numbers to `.salgadinhos/ports.json`, stamps the lane sentinel, runs the scaffold's fast check and makes the first commit, then installs the master guard. The creation skill in the `salgadinhos` repo drives the parameters and the follow-up — remote repo, CI, secrets, domain, first deploy. See [AGENTS.md](AGENTS.md) → "Creation".
 
 ## `kotlin/`
 

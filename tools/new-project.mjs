@@ -13,10 +13,14 @@
 // carry `{{value}}` (the role's computed number); the port roles run before the other values and
 // every value runs before the name token.
 //
+// Creation also owns a project's port block: the lowest fully free 10-port base in 8100–8299,
+// with occupancy read from family-repo literals, live listeners and `docker ps`, committed to
+// `.salgadinhos/ports.json`. A later lane adopts that record; `--force` never reallocates it.
+//
 // Usage:
 //   node tools/new-project.mjs --stack <stack> --name <project> [--lane <dir>] [--to <dir>]
-//       [--db <name>] [--port <n>] [--mysql-port <n>] [--frontend-dev-port <n>]
-//       [--image <repo/name>] [--base-path </path/>]
+//       [--db <name>] [--port <n>] [--web-port <n>] [--mysql-port <n>]
+//       [--frontend-dev-port <n>] [--base <n>] [--image <repo/name>] [--base-path </path/>]
 //       [--code-root <dir>] [--skip-check] [--skip-guard] [--force]
 
 import {
@@ -26,6 +30,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -166,8 +171,6 @@ function orderedValueKeys(values) {
   return [...portKeys, ...otherKeys];
 }
 
-const cliFlag = (key) => `--${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
-
 export function applyValueOverrides(rootDir, { token, values, overrides }) {
   const applied = [];
   for (const key of orderedValueKeys(values)) {
@@ -247,6 +250,194 @@ export function sentinelText({ source, lane, scaffoldSha, revision = 1, note = "
 }
 
 // ---------------------------------------------------------------------------
+// Port blocks: the allocation range and the occupancy scan
+// ---------------------------------------------------------------------------
+
+// One 10-port block per generated project, base = API port. The range is inclusive and sits
+// below the OS ephemeral range and clear of the scaffold defaults. The role table is the one
+// source of each role's offset and CLI flag.
+export const PORT_BLOCK = { start: 8100, end: 8299, step: 10, size: 10 };
+const ROLE_SPEC = {
+  api: { offset: 0, flag: "--port" },
+  web: { offset: 1, flag: "--web-port" },
+  mysql: { offset: 2, flag: "--mysql-port" },
+  frontendDev: { offset: 3, flag: "--frontend-dev-port" },
+};
+export const PORT_ROLES = Object.keys(ROLE_SPEC);
+
+export const blockForBase = (base) =>
+  Object.fromEntries(PORT_ROLES.map((role) => [role, base + ROLE_SPEC[role].offset]));
+
+const candidateBases = () => {
+  const bases = [];
+  for (let base = PORT_BLOCK.start; base + PORT_BLOCK.size - 1 <= PORT_BLOCK.end; base += PORT_BLOCK.step) bases.push(base);
+  return bases;
+};
+
+export const blockIsFree = (base, occupied) => {
+  for (let offset = 0; offset < PORT_BLOCK.size; offset++) if (occupied.has(base + offset)) return false;
+  return true;
+};
+
+// The first fully free base, lowest first. `null` means the range is exhausted — the caller
+// aborts loudly rather than borrowing above the range or reusing a freed block.
+export function allocateBlock(occupied) {
+  for (const base of candidateBases()) if (blockIsFree(base, occupied)) return blockForBase(base);
+  return null;
+}
+
+export const blocksInUse = (occupied) => candidateBases().filter((base) => !blockIsFree(base, occupied));
+
+// Any in-range integer counts, whatever file carries it: docs, IDE configs and runbooks are
+// occupancy too, and a stray number costs one block step, never a silent collision. The
+// lookarounds keep `18100` out while a `PORT_8100` identifier still counts (conservative).
+const PORT_TOKEN = /(?<![0-9])8[12]\d{2}(?![0-9])/g;
+
+export function portsFromText(text) {
+  const ports = new Set();
+  for (const match of String(text).matchAll(PORT_TOKEN)) ports.add(Number(match[0]));
+  return ports;
+}
+
+// /proc/net/tcp: local_address is `HEXADDR:HEXPORT`, the state column `0A` is LISTEN.
+export function parseProcNetTcp(text) {
+  const ports = new Set();
+  for (const line of String(text).split("\n").slice(1)) {
+    const columns = line.trim().split(/\s+/);
+    if (columns.length < 4 || columns[3] !== "0A") continue;
+    const port = Number.parseInt(columns[1]?.split(":").pop() ?? "", 16);
+    if (Number.isInteger(port)) ports.add(port);
+  }
+  return ports;
+}
+
+const addressPort = (token) => {
+  const match = token.match(/:(\d+)$/);
+  if (match) return Number(match[1]);
+  const dotted = token.match(/\.(\d+)$/);
+  return dotted ? Number(dotted[1]) : null;
+};
+
+// `netstat` for macOS (`127.0.0.1.8100`) and Windows (`0.0.0.0:8100`); only LISTEN rows count.
+export function parseNetstatListeners(text) {
+  const ports = new Set();
+  for (const line of String(text).split("\n")) {
+    if (!/\bLISTEN(?:ING)?\b/.test(line)) continue;
+    const column = line.trim().split(/\s+/).find((token) => addressPort(token) !== null);
+    const port = column ? addressPort(column) : null;
+    if (port !== null) ports.add(port);
+  }
+  return ports;
+}
+
+// `docker ps --format '{{.Ports}}'`: the published side of each `host:port->container/port`.
+export function parseDockerPorts(text) {
+  const ports = new Set();
+  for (const match of String(text).matchAll(/:(\d+)->/g)) ports.add(Number(match[1]));
+  return ports;
+}
+
+const readTolerant = (abs) => {
+  try {
+    const buffer = readFileSync(abs);
+    return buffer.includes(0) ? null : buffer.toString("utf8");
+  } catch {
+    return null;
+  }
+};
+
+// A sibling repo's tracked text files, via `git grep` (the same source the propagation flow
+// trusts). `null` means the directory is not a git checkout, so it contributes nothing.
+export function scanRepoLiterals(repoDir) {
+  const result = spawnSync(
+    "git",
+    ["-C", repoDir, "grep", "-I", "-l", "-E", "(^|[^0-9])8[12][0-9]{2}([^0-9]|$)"],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true },
+  );
+  if (result.error || result.status === 128) return null;
+  if (result.status === 1) return new Set();
+  if (result.status !== 0) return null;
+  const ports = new Set();
+  for (const file of result.stdout.split("\n").map((line) => line.trim()).filter(Boolean)) {
+    const text = readTolerant(join(repoDir, file));
+    if (text === null) continue;
+    for (const port of portsFromText(text)) ports.add(port);
+  }
+  return ports;
+}
+
+// Live OS listeners: /proc on Linux, `netstat` elsewhere. Only TCP LISTEN state counts.
+export function liveListenerPorts(platform = process.platform) {
+  const ports = new Set();
+  if (platform === "linux") {
+    let read = false;
+    for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+      const text = readTolerant(file);
+      if (text === null) continue;
+      read = true;
+      for (const port of parseProcNetTcp(text)) ports.add(port);
+    }
+    if (read) return ports;
+  }
+  const result = spawnSync("netstat", platform === "win32" ? ["-ano", "-p", "tcp"] : ["-an", "-p", "tcp"], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (!result.error && result.status === 0) for (const port of parseNetstatListeners(result.stdout)) ports.add(port);
+  return ports;
+}
+
+export function dockerPublishedPorts() {
+  const result = spawnSync("docker", ["ps", "--format", "{{.Ports}}"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+  if (result.error || result.status !== 0) return new Set();
+  return parseDockerPorts(result.stdout);
+}
+
+// Every immediate child of the family root is an occupancy source (`salgadinhos` included); the
+// environments checkout itself and the project being created are not.
+export function scanOccupiedPorts({ codeRoot, environmentsPath, projectRoot }) {
+  const occupied = new Set();
+  const skip = [resolve(environmentsPath)];
+  if (projectRoot) skip.push(resolve(projectRoot));
+  for (const entry of readdirSync(codeRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const dir = join(codeRoot, entry.name);
+    if (skip.includes(resolve(dir))) continue;
+    const literals = scanRepoLiterals(dir);
+    if (literals) for (const port of literals) occupied.add(port);
+  }
+  for (const port of liveListenerPorts()) occupied.add(port);
+  for (const port of dockerPublishedPorts()) occupied.add(port);
+  return occupied;
+}
+
+const portsRecordPath = (projectRoot) => join(projectRoot, ".salgadinhos", "ports.json");
+
+// The committed block a project already owns. A lane created in the project adopts it verbatim;
+// an explicit number that contradicts it refuses.
+export function loadPortsRecord(projectRoot) {
+  const path = portsRecordPath(projectRoot);
+  if (!existsSync(path)) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new ConfigError(`${path}: invalid JSON (${error.message})`);
+  }
+  const record = {};
+  for (const role of PORT_ROLES) {
+    const value = parsed?.[role];
+    if (!Number.isInteger(value) || value <= 0) throw new ConfigError(`${path}: '${role}' must be a positive integer`);
+    record[role] = value;
+  }
+  return record;
+}
+
+export const portsJsonText = (ports) =>
+  `${JSON.stringify(Object.fromEntries(PORT_ROLES.map((role) => [role, ports[role]])), null, 2)}\n`;
+
+// ---------------------------------------------------------------------------
 // Creation
 // ---------------------------------------------------------------------------
 
@@ -295,14 +486,38 @@ function copyTree(src, dest, modes = new Map(), current = "") {
   }
 }
 
-// Rename each entry before recursing, so children are addressed through their new path.
+// Move a directory's contents into an existing one, replacing files but recursing into matched
+// directories, so a forced re-run merges into the already-renamed tree instead of colliding.
+function mergeDirectory(from, to) {
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    const childFrom = join(from, entry.name);
+    const childTo = join(to, entry.name);
+    if (entry.isDirectory() && existsSync(childTo) && statSync(childTo).isDirectory()) {
+      mergeDirectory(childFrom, childTo);
+      continue;
+    }
+    rmSync(childTo, { recursive: true, force: true });
+    renameSync(childFrom, childTo);
+  }
+  rmSync(from, { recursive: true, force: true });
+}
+
+// Rename each entry before recursing, so children are addressed through their new path. A
+// forced re-run finds the target already there (the previous run renamed it): merge instead.
 function renameTokenPaths(dir, token, name) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const from = join(dir, entry.name);
     const renamed = applyPlaceholders(entry.name, token, name);
     const target = renamed === entry.name ? from : join(dir, renamed);
-    if (renamed !== entry.name) renameSync(from, target);
-    if (entry.isDirectory()) renameTokenPaths(target, token, name);
+    if (target !== from) {
+      if (entry.isDirectory() && existsSync(target) && statSync(target).isDirectory()) {
+        mergeDirectory(from, target);
+      } else {
+        rmSync(target, { recursive: true, force: true });
+        renameSync(from, target);
+      }
+    }
+    if (existsSync(target) && statSync(target).isDirectory()) renameTokenPaths(target, token, name);
   }
 }
 
@@ -349,32 +564,51 @@ function requireGit(result, what) {
   }
 }
 
-// A host port published by a sibling app collides with the new app. Scans the sibling's root
-// compose and its lane composes, short (`- 8080:8080`) and long (`published: 8080`) forms.
-function findPortCollisions(codeRoot, port, projectRoot) {
-  const short = new RegExp(`^\\s*-\\s*["']?${escapeRegex(port)}:`, "m");
-  const published = new RegExp(`^\\s*(-\\s*)?published:\\s*["']?${escapeRegex(port)}["']?\\s*$`, "m");
-  const hits = [];
-  for (const entry of readdirSync(codeRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "environments" || entry.name === "salgadinhos") continue;
-    const sibling = join(codeRoot, entry.name);
-    if (resolve(sibling) === resolve(projectRoot)) continue;
-    const composes = [join(sibling, "docker-compose.yml")];
-    for (const child of readdirSync(sibling, { withFileTypes: true })) {
-      if (child.isDirectory() && !child.name.startsWith(".") && !SKIP_DIRS.has(child.name)) {
-        composes.push(join(sibling, child.name, "docker-compose.yml"));
+// A block is free when all ten of its ports are clear; exhaustion is loud, never a borrow above
+// the range and never a round-robin into a freed block.
+function exhaustionError(occupied) {
+  const bases = blocksInUse(occupied);
+  return new CreationError(
+    `no free port block in ${PORT_BLOCK.start}–${PORT_BLOCK.end}: blocks in use ${bases.join(", ")} — ` +
+      "pass --base <n>, or --port/--web-port/--mysql-port/--frontend-dev-port to choose explicit numbers",
+  );
+}
+
+const ROLE_FLAGS = Object.fromEntries(PORT_ROLES.map((role) => [role, ROLE_SPEC[role].flag]));
+
+// The project's block: an existing record is authoritative (adopt, or refuse a contradiction);
+// otherwise explicit choices fill the gap over an allocated free block. Any chosen port that
+// lands on a committed or live one warns and proceeds — only a contradiction with the record
+// refuses.
+export function resolveProjectPorts({ projectRoot, explicitPorts, codeRoot, environmentsPath, log = () => {} }) {
+  const record = loadPortsRecord(projectRoot);
+  if (record) {
+    for (const role of PORT_ROLES) {
+      if (explicitPorts[role] !== undefined && explicitPorts[role] !== record[role]) {
+        throw new ConfigError(
+          `${ROLE_FLAGS[role]} ${explicitPorts[role]} contradicts ${portsRecordPath(projectRoot)} (${role} is ${record[role]}) — a later lane adopts the committed block`,
+        );
       }
     }
-    for (const compose of composes) {
-      if (!existsSync(compose)) continue;
-      const text = readFileSync(compose, "utf8");
-      if (short.test(text) || published.test(text)) {
-        hits.push(entry.name);
-        break;
+    return record;
+  }
+  const occupied = scanOccupiedPorts({ codeRoot, environmentsPath, projectRoot });
+  let chosen;
+  if (explicitPorts.api !== undefined) {
+    chosen = { ...blockForBase(explicitPorts.api), ...explicitPorts };
+  } else {
+    const allocated = allocateBlock(occupied);
+    if (!allocated) throw exhaustionError(occupied);
+    chosen = { ...allocated, ...explicitPorts };
+  }
+  if (Object.keys(explicitPorts).length > 0) {
+    for (const role of PORT_ROLES) {
+      if (occupied.has(chosen[role])) {
+        log(`[new-project] note: explicit ${role} port ${chosen[role]} overlaps a committed or live port — proceeding`);
       }
     }
   }
-  return hits.sort();
+  return chosen;
 }
 
 export function createProject({
@@ -385,6 +619,8 @@ export function createProject({
   lane = null,
   to = null,
   overrides = {},
+  ports = {},
+  base = null,
   skipCheck = false,
   skipGuard = false,
   force = false,
@@ -412,27 +648,26 @@ export function createProject({
       );
     }
   }
-  for (const key of PORT_VALUE_KEYS) {
-    if (overrides[key] !== undefined && !/^[0-9]+$/.test(overrides[key])) {
-      throw new ConfigError(`${cliFlag(key)} must be a number, got '${overrides[key]}'`);
+  for (const role of PORT_ROLES) {
+    if (ports[role] !== undefined && !/^[0-9]+$/.test(ports[role])) {
+      throw new ConfigError(`${ROLE_FLAGS[role]} must be a number, got '${ports[role]}'`);
     }
   }
+  if (base !== null && !/^[0-9]+$/.test(base)) throw new ConfigError(`--base must be a number, got '${base}'`);
 
-  const effectivePort = overrides.port ?? values.port?.default;
   const projectRoot = resolve(to ?? join(codeRoot, name));
-  if (values.port && effectivePort) {
-    const collisions = findPortCollisions(codeRoot, effectivePort, projectRoot);
-    if (collisions.length > 0 && overrides.port === undefined) {
-      throw new ConfigError(
-        `port ${effectivePort} is already published by ${collisions.join(", ")} — pass --port <n> to pick another one`,
-      );
-    }
-    if (collisions.length > 0) log(`[new-project] note: port ${effectivePort} is also published by ${collisions.join(", ")}`);
-  }
-
+  const explicitPorts = base !== null ? blockForBase(Number(base)) : {};
+  for (const role of PORT_ROLES) if (ports[role] !== undefined) explicitPorts[role] = Number(ports[role]);
   if (existsSync(projectRoot) && readdirSync(projectRoot).length > 0 && !force) {
     throw new ConfigError(`${projectRoot} exists and is not empty (pass --force to create inside it)`);
   }
+
+  const chosenPorts = resolveProjectPorts({ projectRoot, explicitPorts, codeRoot, environmentsPath, log });
+
+  const portOverrides = {};
+  if (values.port) portOverrides.port = String(chosenPorts.api);
+  if (values.mysqlPort) portOverrides.mysqlPort = String(chosenPorts.mysql);
+  if (values.frontendDevPort) portOverrides.frontendDevPort = String(chosenPorts.frontendDev);
 
   const scaffoldSha = gitText(["rev-parse", "HEAD"], environmentsPath);
   if (!scaffoldSha) throw new ConfigError(`cannot resolve the scaffold commit in ${environmentsPath} (is it a git checkout?)`);
@@ -441,7 +676,7 @@ export function createProject({
 
   const laneAbs = join(projectRoot, laneDir);
   copyTree(join(environmentsPath, stack), laneAbs, scaffoldModes(environmentsPath, stack, scaffoldSha));
-  const appliedValues = applyValueOverrides(laneAbs, { token, values, overrides });
+  const appliedValues = applyValueOverrides(laneAbs, { token, values, overrides: { ...portOverrides, ...overrides } });
   renameTokenPaths(laneAbs, token, name);
   rewriteTokenContents(laneAbs, { token, name, keep });
   writeFileSync(join(laneAbs, ".salgadinhos", "manifest.yml"), rewriteProjectManifest(manifest), "utf8");
@@ -449,6 +684,7 @@ export function createProject({
   const sentinelPath = join(projectRoot, ".salgadinhos", `${sentinelFileName(laneDir)}.yml`);
   mkdirSync(dirname(sentinelPath), { recursive: true });
   writeFileSync(sentinelPath, sentinelText({ source: stack, lane: laneDir, scaffoldSha }), "utf8");
+  writeFileSync(portsRecordPath(projectRoot), portsJsonText(chosenPorts), "utf8");
 
   const leftovers = findTokenLeftovers(laneAbs, { token, keep });
   if (leftovers.length > 0) {
@@ -465,10 +701,14 @@ export function createProject({
 
   requireGit(git(["init", "-q", "-b", "master"], projectRoot), "git init");
   requireGit(git(["add", "-A"], projectRoot), "git add");
-  requireGit(
-    git(["commit", "-q", "-m", `Bootstrap ${name} from the ${stack} scaffold`, "-m", `Applied revision 1 of the ${stack} scaffold (${scaffoldSha}).`], projectRoot),
-    "git commit",
-  );
+  // A forced re-run over an identical lane stages nothing; that is success, not a failure.
+  const staged = git(["diff", "--cached", "--quiet"], projectRoot);
+  if (staged.status !== 0) {
+    requireGit(
+      git(["commit", "-q", "-m", `Bootstrap ${name} from the ${stack} scaffold`, "-m", `Applied revision 1 of the ${stack} scaffold (${scaffoldSha}).`], projectRoot),
+      "git commit",
+    );
+  }
 
   if (!skipGuard) {
     const installer = join(codeRoot, "salgadinhos", "adapters", "install.mjs");
@@ -477,7 +717,7 @@ export function createProject({
     if (result.error || result.status !== 0) throw new CreationError("master guard installation failed (pass --skip-guard to skip it)");
   }
 
-  return { projectRoot, laneDir, laneAbs, sentinelPath, scaffoldSha, appliedValues, check, skippedCheck: skipCheck || !check, skippedGuard: skipGuard };
+  return { projectRoot, laneDir, laneAbs, sentinelPath, scaffoldSha, appliedValues, ports: chosenPorts, check, skippedCheck: skipCheck || !check, skippedGuard: skipGuard };
 }
 
 // ---------------------------------------------------------------------------
@@ -491,19 +731,34 @@ const USAGE = `usage: node tools/new-project.mjs --stack <stack> --name <project
   --code-root <dir>   family root holding environments/ and salgadinhos/
                       (default: the parent of this checkout)
   --db <name>         override the DB name (convention: the project name)
-  --port <n>          override the app port (convention: 8080, collision-checked)
-  --mysql-port <n>    override the MySQL host port (convention: 3306)
+  --port <n>          the API port (default: the first free block's base)
+  --web-port <n>      the web/UI host port (default: base+1)
+  --mysql-port <n>    the MySQL host port (default: base+2)
   --frontend-dev-port <n>
-                      override the frontend dev port (convention: 5273)
+                      the frontend dev port (default: base+3)
+  --base <n>          fill all four ports from one block (api=base, web=base+1, ...)
   --image <repo/name> override the published image
   --base-path </p/>   override the SPA base path
   --skip-check        do not run the scaffold's fast check
   --skip-guard        do not install the master guard
-  --force             create into an existing non-empty directory
+  --force             create into an existing non-empty directory (never reallocates)
   --help              show this message`;
 
 export function parseArgs(argv) {
-  const args = { stack: null, name: null, lane: null, to: null, codeRoot: null, overrides: {}, skipCheck: false, skipGuard: false, force: false, help: false };
+  const args = {
+    stack: null,
+    name: null,
+    lane: null,
+    to: null,
+    codeRoot: null,
+    overrides: {},
+    ports: {},
+    base: null,
+    skipCheck: false,
+    skipGuard: false,
+    force: false,
+    help: false,
+  };
   for (let i = 2; i < argv.length; i++) {
     const flag = argv[i];
     const value = () => {
@@ -516,9 +771,11 @@ export function parseArgs(argv) {
     else if (flag === "--to") args.to = value();
     else if (flag === "--code-root") args.codeRoot = value();
     else if (flag === "--db") args.overrides.db = value();
-    else if (flag === "--port") args.overrides.port = value();
-    else if (flag === "--mysql-port") args.overrides.mysqlPort = value();
-    else if (flag === "--frontend-dev-port") args.overrides.frontendDevPort = value();
+    else if (flag === "--port") args.ports.api = value();
+    else if (flag === "--web-port") args.ports.web = value();
+    else if (flag === "--mysql-port") args.ports.mysql = value();
+    else if (flag === "--frontend-dev-port") args.ports.frontendDev = value();
+    else if (flag === "--base") args.base = value();
     else if (flag === "--image") args.overrides.image = value();
     else if (flag === "--base-path") args.overrides.basePath = value();
     else if (flag === "--skip-check") args.skipCheck = true;
@@ -545,6 +802,9 @@ function main(argv) {
     const result = createProject({ environmentsPath, codeRoot, ...args });
     console.log(`[new-project] created ${result.projectRoot}/${result.laneDir} from the '${args.stack}' scaffold`);
     console.log(`[new-project]   sentinel: ${result.sentinelPath} (revision 1, scaffold ${result.scaffoldSha})`);
+    console.log(
+      `[new-project]   ports: api ${result.ports.api}, web ${result.ports.web}, mysql ${result.ports.mysql}, frontendDev ${result.ports.frontendDev} (.salgadinhos/ports.json)`,
+    );
     console.log(`[new-project]   overrides: ${result.appliedValues.length > 0 ? result.appliedValues.join(", ") : "none"}`);
     console.log(`[new-project]   fast check: ${result.skippedCheck ? "skipped" : result.check}`);
     console.log(`[new-project]   master guard: ${result.skippedGuard ? "skipped" : "installed"}`);
