@@ -23,7 +23,7 @@ New API call: typed function in `api/client.ts` → hook in `api/queries.ts` →
 ## Commands
 
 ```bash
-npm run dev         # vite dev server, port 5273
+npm run dev         # vite dev server, FRONTEND_DEV_PORT (default 5273)
 npm run typecheck    # tsc -b --noEmit
 npm run lint         # biome check
 npm run lint:fix     # biome check --write
@@ -39,6 +39,17 @@ npm run build         # tsc -b && vite build
 ## Dev proxy / deployment base path
 
 `vite.config.ts`'s `base` defaults to `/template/` in a production build and `/` in dev; the creation tooling rewrites the production base path from the manifest's `instantiate:` section, and `VITE_BASE` overrides it. The dev server proxies `/api` to `VITE_API_TARGET` (default `http://localhost:8080`) to dodge CORS — a generated project is served under a sub-path behind the unified dashboard reverse proxy.
+
+### Ports
+
+`vite.config.ts` reads `.env` through `loadEnv(mode, process.cwd(), "")` — Vite does not inject `.env` into `process.env`, so a value set only in `.env` is visible here and nowhere else. Both keys fall back to the canonical scaffold numbers below; a generated project's `.env` overrides them with its assigned block.
+
+| Role | Env key | Canonical default |
+|---|---|---|
+| `frontend-dev` (Vite dev server) | `FRONTEND_DEV_PORT` | `5273` |
+| `api` (the `/api` proxy target) | `VITE_API_TARGET` | `http://localhost:8080` |
+
+The dev server is strict (`strictPort: true`): a taken `FRONTEND_DEV_PORT` fails loudly instead of auto-incrementing, so the served URL cannot drift from the block or from an externally registered origin (e.g. an OAuth redirect URI).
 
 ## Testing scope
 

@@ -29,11 +29,11 @@ Module → key files → seam index, plus the app entry points; seeded from the 
 ### Repo root — build, theme, proxy, CI
 **Purpose**: the Vite/Biome/TypeScript toolchain, the theme tokens and the dev-server wiring.
 **Files**: `vite.config.ts`, `vitest.config.ts`, `biome.json`, `tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`; `src/index.css`; `index.html`; `package.json`; `.env.example`; `.github/workflows/ci.yml`
-**Seam(s)**: `vite.config.ts` owns the production `base` path and the dev `/api` proxy (`VITE_API_TARGET`, default `http://localhost:8080`); `src/index.css`'s `@theme` block is the token source (no `tailwind.config.js`); `package.json`'s `check` script (typecheck + Biome + Vitest) is the fast gate, mirrored by CI.
+**Seam(s)**: `vite.config.ts` owns the production `base` path and, via `loadEnv`, the dev server's port (`FRONTEND_DEV_PORT`, default `5273`, strict) and `/api` proxy (`VITE_API_TARGET`, default `http://localhost:8080`); `src/index.css`'s `@theme` block is the token source (no `tailwind.config.js`); `package.json`'s `check` script (typecheck + Biome + Vitest) is the fast gate, mirrored by CI.
 
 ## Entry points
 
 - `index.html` — the Vite document; loads `src/main.tsx`.
 - `src/main.tsx` — mounts React with the TanStack `QueryClient` and the browser router (`basename` from `BASE_URL`).
 - `src/App.tsx` — the route table: `Layout` as the shell with `Dashboard` as the index route.
-- `vite.config.ts` — the dev server (port `5273`) and the `/api` proxy; the production build's base path.
+- `vite.config.ts` — the dev server (port `FRONTEND_DEV_PORT`, default `5273`, strict) and the `/api` proxy; the production build's base path.
