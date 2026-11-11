@@ -529,7 +529,7 @@ test("committed manifests: the live scaffolds declare the creation data", () => 
   const kotlin = loadManifest(join(REPO_ROOT, "kotlin", ".salgadinhos", "manifest.yml")).instantiate;
   assert.equal(kotlin.lane, "backend");
   assert.equal(kotlin.check, "./gradlew clean build");
-  assert.deepEqual(kotlin.keep, ["config/detekt/config.yml", "gradlew", "gradlew.bat"]);
+  assert.deepEqual(kotlin.keep, [".salgadinhos/manifest.yml", "config/detekt/config.yml", "gradlew", "gradlew.bat"]);
   assert.deepEqual(Object.keys(kotlin.values).sort(), ["db", "image", "port"]);
   assert.deepEqual(kotlin.values.db.replacements[".env.example"], ["MYSQL_DATABASE=template"]);
   assert.deepEqual(kotlin.values.port.replacements[".env.example"], ["8080"]);

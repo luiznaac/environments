@@ -14,8 +14,9 @@ class DatabaseConfig {
         @Value("\${mysql.port}") port: Int,
         @Value("\${mysql.user}") user: String,
         @Value("\${mysql.password}") password: String,
+        @Value("\${mysql.database}") database: String,
     ) = Database.connect(
-        url = mysqlJdbcUrl(host = host, port = port, database = "template"),
+        url = mysqlJdbcUrl(host = host, port = port, database = database),
         driver = "com.mysql.cj.jdbc.Driver",
         user = user,
         password = password,

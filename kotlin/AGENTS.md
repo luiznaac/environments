@@ -20,7 +20,7 @@ application  →  http-api  →  usecase  ←  persistence
 - **`gateway`** — outbound integrations. `KtorClientConfig`, `AppHealthGateway`/`HttpClientHealthCheck` are the worked example.
 - **`http-api`** — Ktor routes as `@Component` classes implementing `ControllerTemplate`. `KtorConfig` starts the embedded Netty server and wires up all controllers. `HealthController` is the one working example endpoint.
 - **`application`** — composition root. `Boot.kt` (Spring `@ComponentScan` + `runApplication`).
-- **`integrationTest`** — full-stack tests via docker-compose. `DockerComposeExtension`, `IntegrationTest` base class, WireMock + Kotest helpers.
+- **`integrationTest`** — full-stack tests against a Testcontainers MySQL. `MySqlContainerExtension`, `IntegrationTest` base class, WireMock + Kotest helpers.
 
 ## Design principles
 
@@ -55,7 +55,7 @@ Changing a table:
 2. Point `MYSQL_HOST`/`MYSQL_USER`/`MYSQL_PASSWORD` at a database already migrated to head, then `./gradlew :persistence:generateMigrationScript -Pname=V2__add_something` — diffs the Exposed `Table` objects against it and writes the SQL. Review the output before committing — the diff is mechanical and won't know a rename is a rename rather than a drop-and-add.
 3. `./gradlew :persistence:migrate` to apply it locally.
 
-`integrationTest/.../tests/MigrationSchemaTest.kt` is the guard: `DockerComposeExtension` migrates the compose-provided MySQL to head before any spec runs, and this test asserts `MigrationUtils.statementsRequiredForDatabaseMigration(*allTables)` is empty. If a `Table` changes without a matching migration (or vice versa), this test fails.
+`integrationTest/.../tests/MigrationSchemaTest.kt` is the guard: `MySqlContainerExtension` migrates the container MySQL to head before any spec runs, and this test asserts `MigrationUtils.statementsRequiredForDatabaseMigration(*allTables)` is empty. If a `Table` changes without a matching migration (or vice versa), this test fails.
 
 ## Domain errors
 
@@ -94,7 +94,7 @@ Before finishing a change, run these in order — cheapest and most local first,
 
 `autoCorrect = true` means detekt **rewrites** import order and formatting in place as it runs. Treat it as a formatter that also reports: after it finishes, re-read the diff before committing, because a clean "0 issues" exit can still mean your file on disk is not the file you wrote.
 
-Step 3 is `unitTest`: it depends on every module's `test` except `:integrationTest:test`, so it never touches Docker — this is the lane the pre-commit hook runs. `./gradlew test` is unchanged and still fans out to every module, **including `:integrationTest:test`**, which boots MySQL via `DockerComposeExtension` and needs Docker up; run it when you want both lanes. `:integrationTest:dockerPreflight` probes the daemon first and fails in seconds with a message that says what to do, instead of leaving an opaque `DockerClientProviderStrategy` error to be found in the HTML report.
+Step 3 is `unitTest`: it depends on every module's `test` except `:integrationTest:test`, so it never touches Docker — this is the lane the pre-commit hook runs. `./gradlew test` is unchanged and still fans out to every module, **including `:integrationTest:test`**, which boots MySQL via `MySqlContainerExtension` and needs Docker up; run it when you want both lanes. `:integrationTest:dockerPreflight` probes the daemon first and fails in seconds with a message that says what to do, instead of leaving an opaque `DockerClientProviderStrategy` error to be found in the HTML report.
 
 Step 4 (`build`) includes steps 1–3 plus the integration suite and packaging, so a green `build` implies all of them. Running 1–3 first is about *time to feedback*, not about coverage.
 
@@ -130,7 +130,7 @@ Test source roots — and the search-before-create rule:
 
 - Each module's `src/test/kotlin` holds its unit specs, **mirroring the main package layout** — a spec for `foo/Bar.kt` lives under `src/test/kotlin/foo/BarTest.kt`, in the same package.
 - `usecase/src/testFixtures/kotlin` holds the shared builders (`BasicHelpers.kt`); add a builder there rather than hand-rolling fixtures per spec.
-- `integrationTest/src/test/kotlin` holds the full-stack specs and their harness (docker-compose, WireMock, Kotest extensions).
+- `integrationTest/src/test/kotlin` holds the full-stack specs and their harness (Testcontainers MySQL, WireMock, Kotest extensions).
 
 Search for an existing spec and an existing fixture **before creating a new one** — a near-duplicate spec or a second `BasicHelpers`-style builder is the usual miss.
 
@@ -150,6 +150,7 @@ Search for an existing spec and an existing fixture **before creating a new one*
 | `ktor.wait` | fixed `true` | blocks main thread on the embedded server |
 | `mysql.host` / `mysql.user` / `mysql.password` | `MYSQL_HOST` / `MYSQL_USER` / `MYSQL_PASSWORD` | required, no defaults |
 | `mysql.port` | `MYSQL_PORT` | defaults to `3306`; the standalone `migrate()` path (`MysqlEnv`) reads the same variable with the same fallback |
+| `mysql.database` | `MYSQL_DATABASE` | defaults to `template`; the standalone `migrate()` path (`MysqlEnv`) reads the same variable with the same fallback |
 
 Use `${VAR}` (required) or `${VAR:default}` (optional) for env var substitution.
 
@@ -173,6 +174,12 @@ configuration: `docker compose up -d mysql` publishes MySQL on host `3306`, and 
 Configuration). A sourced `.env`, or the same variables set in the run config, may override either
 port; the container-internal ports never move. The host port MySQL actually publishes is `docker
 compose port mysql 3306`.
+
+The integration suite binds none of these host ports. It starts one Testcontainers MySQL per test
+JVM, probes a free OS-assigned app port, and gives WireMock a dynamic port, publishing the MySQL
+coordinates and the app port as system properties before the Spring context starts. Two concurrent
+runs of the suite therefore never contend (the probe-then-rebind window on the app port is accepted
+and documented in `MySqlContainerExtension`).
 
 ## Build, run, deploy
 
@@ -221,7 +228,7 @@ On Windows the socket mount is `//var/run/docker.sock:/var/run/docker.sock`. The
 
 `./gradlew clean build` is the CI command, and it is the only thing that exercises everything: compile → detekt → unit tests → the `integrationTest` module → packaging. Two consequences worth knowing before you trust a local run:
 
-- **`integrationTest` is local-only and never "passes" when it didn't run.** It depends on Testcontainers reaching the host daemon (`DockerComposeExtension` boots MySQL), so a suite that was skipped or failed for the environment is reported as **"não executado"**, never as green. With Docker down, `build` fails in the `integrationTest` module — that is a *local environment* failure, not a code failure. Don't chase it in the diff; start Docker.
+- **`integrationTest` is local-only and never "passes" when it didn't run.** It depends on Testcontainers reaching the host daemon (`MySqlContainerExtension` boots MySQL), so a suite that was skipped or failed for the environment is reported as **"não executado"**, never as green. With Docker down, `build` fails in the `integrationTest` module — that is a *local environment* failure, not a code failure. Don't chase it in the diff; start Docker.
 - **A green `unitTest` or `test` is not a green `build`.** `./gradlew test` runs the `integrationTest` module too, but neither it nor the Docker-free `unitTest` lane runs detekt or packaging. `unitTest` is the right stage to repeat while working; it is the wrong one to quote as "it passes".
 
 Local dev: `docker compose up -d mysql` starts MySQL only, then run via the checked-in IntelliJ config in `.run/`, which supplies `MYSQL_HOST=localhost`, `MYSQL_USER=root`, `MYSQL_PASSWORD=`; the ports default in `application.yaml`.

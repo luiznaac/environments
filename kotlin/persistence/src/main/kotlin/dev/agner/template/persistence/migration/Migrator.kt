@@ -13,7 +13,7 @@ object MysqlEnv {
     val database = System.getenv("MYSQL_DATABASE") ?: "template"
 }
 
-// Applies every pending db/migration/V*.sql. Called from DockerComposeExtension so the
+// Applies every pending db/migration/V*.sql. Called from MySqlContainerExtension so the
 // integration suite runs against a migrated database, and by `main` for local/deploy use — never
 // from the Spring context: KtorConfig blocks the main thread for the process's entire lifetime,
 // so a Spring-context hook would never run before the server starts serving traffic anyway. A
