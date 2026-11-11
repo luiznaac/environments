@@ -147,11 +147,14 @@ node tools/sweep-advisory.mjs --apply [--issue] --input sweep-collect.json
 
 ```bash
 node tools/new-project.mjs --stack kotlin --name <project> [--lane backend] [--to <dir>]
-    [--db <name>] [--port <n>] [--mysql-port <n>] [--frontend-dev-port <n>]
-    [--image <repo/name>] [--base-path </p/>] [--code-root <dir>]
+    [--db <name>] [--port <n>] [--web-port <n>] [--mysql-port <n>]
+    [--frontend-dev-port <n>] [--base <n>] [--image <repo/name>]
+    [--base-path </p/>] [--code-root <dir>]
 ```
 
 It copies the scaffold (manifest included), applies `instantiate:` — the token renamed word-boundedly in paths and text and package-name-shapedly in JSON values, plus the value overrides — rewrites the copied manifest to `entries` only, stamps the lane sentinel (`applied: { revision: 1, scaffold_sha }`), runs the zero-leftover assertion and the scaffold's `check`, then `git init`s, commits and installs the master guard (`salgadinhos/adapters/install.mjs --install-repo`) — in that order, so the guard never blocks the first commit. A red assertion or check aborts before the commit. `--skip-check`/`--skip-guard` exist for tests; remote repo, CI, secrets, domain and first deploy are the creation skill's job (`salgadinhos`).
+
+Ports are a **10-port block per project in `8100–8299`**, base = API port: `+0` api, `+1` web, `+2` mysql, `+3` frontend-dev, `+4..+9` reserved to the project. Creation allocates the lowest fully free base — a block is occupied if any of its ten ports is a tracked literal in any family repo (each immediate child of the code root, `salgadinhos` included, `environments` itself excluded), a live OS listener, or a `docker ps` published port — and commits all four numbers to `.salgadinhos/ports.json`, including the roles the scaffold owns no literal for. `--base` fills all four from the block; `--port` stays the API port and the role flags set one each. A later lane in the same project adopts the committed record, an explicit number that contradicts it refuses, and `--force` re-runs creation without reallocating. Explicit numbers that overlap a committed or live port warn and proceed; exhaustion aborts loudly naming the range, the blocks in use and the override flags, never borrowing above `8299`.
 
 `instantiate:` is the creation contract: `name` (token), `lane` (default lane dir), `check` (fast check), `keep` (files where the token is not a placeholder, so creation, detection and propagation all leave them verbatim) and `values` (conventions — `db`, `port`, `mysqlPort`, `frontendDevPort`, `image`, `basePath` — each declaring the per-file literals a CLI override swaps; a literal's token becomes the override, or its `style: whole` makes the override the literal's full replacement, as the image reference needs). A declared literal may carry `{{value}}`: the manifest's `default` is the search anchor and the override replaces it, so `${MYSQL_PORT:-{{value}}}:3306` keeps the interpolation while only the number moves. Port roles run first (api, then the rest of the block), every value runs before the name token, so a `3306/template` literal still matches before the name pass rewrites it. `php` declares no `instantiate.name`, so creation refuses it until a consumer exists.
 
