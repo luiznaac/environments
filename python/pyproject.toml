@@ -52,7 +52,7 @@ test = "pytest"
 # `check` mirrors the Kotlin `test` task: it does NOT run the Docker-backed
 # integration suite. CI runs `test` (full) because the runner has a daemon.
 check = ["lint", "format-check", "typecheck", "contracts", "test-unit"]
-run = "uvicorn template.application.boot:app --reload --port 8080"
+run = "python -m template.application.boot"
 
 # ---------------------------------------------------------------------------
 # Lint / format — Ruff replaces Detekt + detekt-formatting.

@@ -6,6 +6,6 @@ services:
       - MYSQL_ALLOW_EMPTY_PASSWORD=yes
       - MYSQL_DATABASE=template
     ports:
-      - "3306:3306"
+      - "${MYSQL__PORT:-3306}:3306"
     volumes:
       - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql

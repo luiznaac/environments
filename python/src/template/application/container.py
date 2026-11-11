@@ -46,7 +46,7 @@ class Container:
         self.http_client: httpx.AsyncClient = build_http_client()
 
         # --- health slice ------------------------------------------------
-        self._app_health_gateway = AppHealthGateway(self.http_client, settings.gateways.app.host)
+        self._app_health_gateway = AppHealthGateway(self.http_client, settings.app_host)
         self.health_checkers: list[IHealthChecker] = [
             MySqlConnectionHealthCheck(self.engine, self.clock),
             HttpClientHealthCheck(self._app_health_gateway, self.clock),

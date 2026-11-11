@@ -25,7 +25,8 @@ class MySqlConfig(BaseModel):
 
 class AppGatewayConfig(BaseModel):
     # Base URL the service uses to call its own /health/internal (see AppHealthGateway).
-    host: str = "http://localhost:8080"
+    # Unset derives from `HTTP_PORT`; an explicit host wins for container/deploy.
+    host: str | None = None
 
 
 class GatewaysConfig(BaseModel):
@@ -48,5 +49,13 @@ class Settings(BaseSettings):
     gateways: GatewaysConfig = Field(default_factory=GatewaysConfig)
 
     @property
+    def is_dev(self) -> bool:
+        return self.app_env == "dev"
+
+    @property
     def log_as_json(self) -> bool:
-        return self.app_env != "dev"
+        return not self.is_dev
+
+    @property
+    def app_host(self) -> str:
+        return self.gateways.app.host or f"http://localhost:{self.http_port}"

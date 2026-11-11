@@ -7,7 +7,7 @@ A working Python backend service skeleton — the same layered hexagonal archite
 ```bash
 uv sync                       # create .venv + install everything
 uv run poe run                # start the service on http://localhost:8080 (needs MySQL — see below)
-docker-compose up -d mysql    # local MySQL on :3306
+docker compose up -d mysql    # local MySQL on :3306 (or $MYSQL__PORT)
 curl localhost:8080/health
 ```
 
@@ -15,7 +15,7 @@ curl localhost:8080/health
 
 | task               | what it does                                            |
 |--------------------|--------------------------------------------------------|
-| `run`              | uvicorn with reload                                     |
+| `run`              | module entrypoint on `HTTP_PORT` (reload in `dev`)      |
 | `lint` / `format`  | Ruff                                                    |
 | `typecheck`        | mypy `--strict`                                         |
 | `contracts`        | import-linter (layer rules)                             |
