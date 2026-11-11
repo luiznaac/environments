@@ -16,11 +16,11 @@ Module → key files → seam index, plus the app entry points; seeded from the 
 
 ### `persistence` — Exposed/MySQL adapters and migrations
 **Purpose**: implements the `usecase` ports against MySQL via Exposed, and owns the Flyway migration tooling.
-**Files**: `persistence/src/main/kotlin/dev/agner/template/persistence/configuration/DatabaseConfig.kt`; `persistence/src/main/kotlin/dev/agner/template/persistence/health/MySqlConnectionHealthCheck.kt`; `persistence/src/main/kotlin/dev/agner/template/persistence/migration/{MigrationScripts,Migrator}.kt`; `persistence/src/main/resources/db/migration/V1__init.sql`
+**Files**: `persistence/src/main/kotlin/dev/agner/template/persistence/configuration/{DatabaseConfig,MySqlEndpoint}.kt`; `persistence/src/main/kotlin/dev/agner/template/persistence/health/MySqlConnectionHealthCheck.kt`; `persistence/src/main/kotlin/dev/agner/template/persistence/migration/{MigrationScripts,Migrator}.kt`; `persistence/src/main/resources/db/migration/V1__init.sql`
 **Seam(s)**:
 - **Adapter seam** — `MySqlConnectionHealthCheck` is the worked example of a `@Component … : HealthChecker`; a repository implements its `usecase` interface the same way.
 - **Migration seam** — a new `Table` object must be added to `allTables` in `migration/MigrationScripts.kt`; the `:persistence:generateMigrationScript` task is a placeholder that prints guidance (wire it to Exposed's generator as chameidor and portfolio-2 do), and `Migrator.migrate(...)` applies the SQL under `persistence/src/main/resources/db/migration/`. The integration harness migrates the compose database to head through the same function; `MigrationSchemaTest` diffs `allTables` against a migrated database and fails on drift.
-- **Connection seam** — `DatabaseConfig.databaseConnection` is the single Exposed `Database` bean; `Migrator.MysqlEnv` reads the same `MYSQL_*` environment variables for Flyway.
+- **Connection seam** — `DatabaseConfig.databaseConnection` is the single Exposed `Database` bean (host from `mysql.host`, port from `mysql.port`); `Migrator.MysqlEnv` reads the same `MYSQL_*` environment variables for Flyway, and `configuration/MySqlEndpoint.kt` is the one place both production JDBC URLs are built.
 
 ### `gateway` — outbound integrations
 **Purpose**: adapters for the external systems the domain calls. The scaffold ships one worked HTTP example.

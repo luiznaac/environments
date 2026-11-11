@@ -1,5 +1,6 @@
 package dev.agner.template.integrationTest.tests
 
+import dev.agner.template.persistence.migration.MysqlEnv
 import dev.agner.template.persistence.migration.allTables
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -17,7 +18,7 @@ class MigrationSchemaTest : StringSpec({
 
     "schema should match Exposed table definitions" {
         val db = Database.connect(
-            url = "jdbc:mysql://localhost:3306/template",
+            url = "jdbc:mysql://localhost:${MysqlEnv.port}/template",
             driver = "com.mysql.cj.jdbc.Driver",
             user = "root",
             password = "",

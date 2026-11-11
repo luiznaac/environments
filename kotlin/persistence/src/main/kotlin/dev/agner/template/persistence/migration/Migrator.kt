@@ -1,10 +1,13 @@
 package dev.agner.template.persistence.migration
 
+import dev.agner.template.persistence.configuration.mysqlJdbcUrl
+import dev.agner.template.persistence.configuration.resolveMysqlPort
 import org.flywaydb.core.Flyway
 import org.flywaydb.core.api.Location
 
 object MysqlEnv {
     val host = System.getenv("MYSQL_HOST") ?: "localhost"
+    val port = resolveMysqlPort(System.getenv("MYSQL_PORT"))
     val user = System.getenv("MYSQL_USER") ?: "root"
     val password = System.getenv("MYSQL_PASSWORD") ?: ""
     val database = System.getenv("MYSQL_DATABASE") ?: "template"
@@ -17,9 +20,9 @@ object MysqlEnv {
 // failed migration aborts the container instead of leaving a half-migrated app answering
 // requests.
 
-fun migrate(host: String, user: String, password: String, database: String) {
+fun migrate(host: String, port: Int, user: String, password: String, database: String) {
     Flyway.configure()
-        .dataSource("jdbc:mysql://$host:3306/$database", user, password)
+        .dataSource(mysqlJdbcUrl(host = host, port = port, database = database), user, password)
         .baselineOnMigrate(true)
         .baselineVersion("1")
         .locations(Location("classpath:db/migration"))
@@ -28,5 +31,11 @@ fun migrate(host: String, user: String, password: String, database: String) {
 }
 
 fun main() {
-    migrate(MysqlEnv.host, MysqlEnv.user, MysqlEnv.password, MysqlEnv.database)
+    migrate(
+        host = MysqlEnv.host,
+        port = MysqlEnv.port,
+        user = MysqlEnv.user,
+        password = MysqlEnv.password,
+        database = MysqlEnv.database,
+    )
 }

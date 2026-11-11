@@ -1,5 +1,6 @@
 package dev.agner.template.integrationTest.config
 
+import dev.agner.template.persistence.migration.MysqlEnv
 import dev.agner.template.persistence.migration.migrate
 import io.kotest.core.extensions.Extension
 import io.kotest.core.listeners.AfterProjectListener
@@ -20,7 +21,9 @@ object DockerComposeExtension : Extension, BeforeProjectListener, AfterProjectLi
         DockerCompose.start()
         // The compose MySQL starts empty — db/migration/V*.sql is applied by Flyway, not by an
         // init script — so migrate it to head before any spec boots the Spring context.
-        migrate(host = "localhost", user = "root", password = "", database = "template")
+        // Migrate the compose MySQL on the host port it publishes (MYSQL_PORT); MigrationSchemaTest
+        // targets the same address.
+        migrate(host = "localhost", port = MysqlEnv.port, user = "root", password = "", database = "template")
     }
 
     override suspend fun afterProject() {

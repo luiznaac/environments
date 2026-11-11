@@ -11,10 +11,11 @@ class DatabaseConfig {
     @Bean
     fun databaseConnection(
         @Value("\${mysql.host}") host: String,
+        @Value("\${mysql.port}") port: Int,
         @Value("\${mysql.user}") user: String,
         @Value("\${mysql.password}") password: String,
     ) = Database.connect(
-        url = "jdbc:mysql://$host:3306/template",
+        url = mysqlJdbcUrl(host = host, port = port, database = "template"),
         driver = "com.mysql.cj.jdbc.Driver",
         user = user,
         password = password,

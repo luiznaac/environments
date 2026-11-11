@@ -1,8 +1,9 @@
 ktor:
-  port: 8080
+  port: ${KTOR_PORT:8080}
   wait: true
 
 mysql:
   host: ${MYSQL_HOST}
+  port: ${MYSQL_PORT:3306}
   user: ${MYSQL_USER}
   password: ${MYSQL_PASSWORD}
