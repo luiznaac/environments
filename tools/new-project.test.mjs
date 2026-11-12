@@ -23,6 +23,7 @@ import {
   blocksInUse,
   fillValue,
   findTokenLeftovers,
+  isDependencyLockfile,
   parseDockerPorts,
   parseNetstatListeners,
   parseProcNetTcp,
@@ -30,6 +31,7 @@ import {
   replaceJsonTokenValues,
   resolveCheckCommand,
   rewriteProjectManifest,
+  scanRepoLiterals,
   sentinelText,
 } from "./new-project.mjs";
 
@@ -367,6 +369,46 @@ test("portsFromText: only integer tokens inside 8100-8299 are occupancy", () => 
   const ports = portsFromText("Ktor 8100 and 8299, also 8099, 8300, 18100 and 8100.5\n");
   assert.deepEqual([...ports].sort((a, b) => a - b), [8100, 8299]);
   assert.deepEqual([...portsFromText("PORT_8100 PORT_8300")], [8100], "an underscore-adjacent literal still counts");
+});
+
+test("isDependencyLockfile: classifies dependency lockfile names", () => {
+  for (const file of [
+    "package-lock.json",
+    "frontend/package-lock.json",
+    "npm-shrinkwrap.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "bun.lock",
+    "bun.lockb",
+    "uv.lock",
+    "backend/uv.lock",
+    "poetry.lock",
+    "Pipfile.lock",
+    "Cargo.lock",
+    "go.sum",
+    "Gemfile.lock",
+    "composer.lock",
+    "gradle.lockfile",
+    "backend/runtimeClasspath-gradle.lockfile",
+    ".terraform.lock.hcl",
+  ]) {
+    assert.equal(isDependencyLockfile(file), true, file);
+  }
+  for (const file of ["docs/README.md", "src/app.ts", "docker-compose.yml", ".env.example", "locks/app.lock"]) {
+    assert.equal(isDependencyLockfile(file), false, file);
+  }
+});
+
+test("scanRepoLiterals: lockfile hashes are skipped while docs and source still count", () => {
+  const root = makeTree({
+    "src/app.ts": "const port = 8150\n",
+    "docs/runbook.md": "boot on 8160\n",
+    "package-lock.json": '{"integrity":"sha512-abc8192def"}\n',
+    "backend/uv.lock": "hash = sha256:dead8223beef\n",
+  });
+  initGit(root);
+  const ports = scanRepoLiterals(root);
+  assert.deepEqual([...ports].sort((a, b) => a - b), [8150, 8160]);
 });
 
 test("parseProcNetTcp: only LISTEN sockets in the hex local address count", () => {
