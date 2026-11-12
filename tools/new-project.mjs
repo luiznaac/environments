@@ -34,7 +34,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -346,8 +346,39 @@ const readTolerant = (abs) => {
   }
 };
 
-// A sibling repo's tracked text files, via `git grep` (the same source the propagation flow
-// trusts). `null` means the directory is not a git checkout, so it contributes nothing.
+// Dependency lockfiles are machine-generated: their integrity hashes and wheel URLs contain hex
+// fragments that read as in-range integers (e.g. a sha512 payload `...8192...`). They are never
+// port bindings, so counting them would mark almost every block occupied and make allocation
+// useless. The list is explicit on purpose — a generic `*.lock` rule would also drop a real file.
+// Source, config, docs, runbooks and IDE files still count, as the spec requires.
+const LOCKFILE_BASENAMES = new Set([
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "bun.lock",
+  "bun.lockb",
+  "uv.lock",
+  "poetry.lock",
+  "Pipfile.lock",
+  "Cargo.lock",
+  "go.sum",
+  "Gemfile.lock",
+  "composer.lock",
+  "gradle.lockfile",
+  ".terraform.lock.hcl",
+]);
+
+// Gradle names a dependency lock after its configuration (`runtimeClasspath-gradle.lockfile`),
+// so match the suffix as well as the bare name.
+export const isDependencyLockfile = (file) => {
+  const name = basename(file);
+  return LOCKFILE_BASENAMES.has(name) || name.endsWith("-gradle.lockfile");
+};
+
+// A sibling repo's tracked text files (dependency lockfiles excluded), via `git grep` (the same
+// source the propagation flow trusts). `null` means the directory is not a git checkout, so it
+// contributes nothing.
 export function scanRepoLiterals(repoDir) {
   const result = spawnSync(
     "git",
@@ -359,6 +390,7 @@ export function scanRepoLiterals(repoDir) {
   if (result.status !== 0) return null;
   const ports = new Set();
   for (const file of result.stdout.split("\n").map((line) => line.trim()).filter(Boolean)) {
+    if (isDependencyLockfile(file)) continue;
     const text = readTolerant(join(repoDir, file));
     if (text === null) continue;
     for (const port of portsFromText(text)) ports.add(port);
