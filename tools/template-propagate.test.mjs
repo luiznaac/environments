@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -349,6 +349,8 @@ function scaffoldFixture(base, changes) {
       "    pins: [react]",
       "  biome.json: owned",
       "  notes.md: judgment",
+      "  src/template/telemetry.md: owned",
+      "  src/template/present.md: owned",
       "check:",
       "  command: node check/ok.mjs",
       "instantiate:",
@@ -520,6 +522,47 @@ test("runPropagate: dry-run writes nothing; an open cycle opens exactly one PR",
     remoteRefs(project.remote).sort(),
     ["refs/heads/main", `refs/heads/${branch}`].sort(),
   );
+});
+
+test("runPropagate: an owned path containing the token lands on the lane's instantiated path", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-token-"));
+  const scaffold = scaffoldFixture(base, {
+    "src/template/telemetry.md": "contract v2\n",
+    "src/template/present.md": "present v2\n",
+  });
+  // The project name contains the token as a substring, so the substitution must still land on
+  // `src/mytemplate/` — not leave the token path in place, and not double-substitute.
+  const project = projectFixture(base, {
+    name: "mytemplate",
+    lanes: [
+      {
+        lane: "frontend",
+        sentinel: sentinelText({ scaffoldSha: scaffold.pin }),
+        files: {
+          "check/ok.mjs": OK_CHECK,
+          "src/mytemplate/present.md": "present v1\n",
+        },
+      },
+    ],
+  });
+  const result = propagate(base, { dryRun: false, gh: fakeGh() });
+  assert.equal(result.failures, 0);
+  assert.deepEqual(
+    result.repos[0].lanes[0].applies
+      .filter((apply) => apply.file.startsWith("src/template/"))
+      .map((apply) => [apply.file, apply.target, apply.class]),
+    [
+      ["src/template/present.md", "src/mytemplate/present.md", "owned"],
+      ["src/template/telemetry.md", "src/mytemplate/telemetry.md", "owned"],
+    ],
+  );
+
+  const inspect = cloneBranch(base, project.remote, result.repos[0].branch, "inspect-token");
+  assert.equal(lf(readFileSync(join(inspect, "frontend/src/mytemplate/telemetry.md"), "utf8")), "contract v2\n");
+  assert.equal(lf(readFileSync(join(inspect, "frontend/src/mytemplate/present.md"), "utf8")), "present v2\n");
+  assert.equal(existsSync(join(inspect, "frontend/src/template")), false, "the token path must not survive in the lane");
+  // The scaffold side is untouched: the reference file stays under the token path.
+  assert.equal(existsSync(join(scaffold.dir, "react/src/template/telemetry.md")), true);
 });
 
 test("runPropagate: a mode-only move on an owned file is applied and committed", () => {

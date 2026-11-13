@@ -51,6 +51,7 @@ import {
   discoverProjects,
   gitModeAt,
   isExecutableMode,
+  laneSidePath,
   loadManifest,
   loadSentinel,
   modeFromGitOutput,
@@ -597,9 +598,12 @@ function planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, p
     if (watchMode && (scaffoldMode == null || gitModeAt(environmentsPath, pin, `${sentinel.source}/${file}`, gitEnv) == null)) continue;
     // A `watch: mode` entry never reads content (a binary wrapper is a valid target).
     const scaffoldText = watchMode ? null : scaffoldTextAt(environmentsPath, target, sentinel.source, file, gitEnv);
-    const projectPath = join(cloneDir, laneSpec.lane, file);
+    // The scaffold path always carries the token; the lane path has it substituted for the
+    // project's instantiated name (the same rule creation applies to path segments).
+    const laneFile = laneSidePath(file, manifest.instantiate.name, projectName);
+    const projectPath = join(cloneDir, laneSpec.lane, laneFile);
     const projectText = watchMode ? null : existsSync(projectPath) ? readFileSync(projectPath, "utf8") : null;
-    const projectMode = owned ? indexMode(cloneDir, `${laneSpec.lane}/${file}`, gitEnv) : null;
+    const projectMode = owned ? indexMode(cloneDir, `${laneSpec.lane}/${laneFile}`, gitEnv) : null;
     const transformed = transformEntry({
       entry,
       scaffoldText,
@@ -614,9 +618,9 @@ function planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, p
     if (transformed.text !== null) writeFileSync(projectPath, withEol(transformed.text, dominantEol(projectText ?? "")));
     if (transformed.mode !== null) {
       chmodSync(projectPath, modePermissions(transformed.mode));
-      plan.modes.push({ path: `${laneSpec.lane}/${file}`, mode: transformed.mode });
+      plan.modes.push({ path: `${laneSpec.lane}/${laneFile}`, mode: transformed.mode });
     }
-    plan.applies.push({ file, class: entry.class, changes: transformed.changes });
+    plan.applies.push({ file, target: laneFile, class: entry.class, changes: transformed.changes });
   }
   return plan;
 }
@@ -641,7 +645,7 @@ function prBody(target, plans) {
   for (const plan of plans) {
     if (plan.pin === target) continue;
     lines.push(`## ${plan.lane} (${plan.source})`, "");
-    for (const apply of plan.applies) lines.push(`- \`${apply.file}\` — ${apply.class}: ${apply.changes.join(", ")}`);
+    for (const apply of plan.applies) lines.push(`- \`${apply.target}\` — ${apply.class}: ${apply.changes.join(", ")}`);
     for (const skip of plan.skipped) {
       const note = skip.reason === "allow" ? `allowed${skip.note ? `: ${skip.note}` : ""}` : "judgment — route through the porting skill";
       lines.push(`- skipped \`${skip.file}\` — ${note}`);
@@ -836,7 +840,7 @@ export function formatRun(result) {
       }
       if (lane.pin === result.target.sha) continue;
       lines.push(`  ${lane.lane} (${lane.source}, revision ${lane.revision}):`);
-      for (const apply of lane.applies) lines.push(`    apply  ${apply.file} (${apply.class}: ${apply.changes.join(", ")})`);
+      for (const apply of lane.applies) lines.push(`    apply  ${apply.target} (${apply.class}: ${apply.changes.join(", ")})`);
       for (const skip of lane.skipped) lines.push(`    skip   ${skip.file} (${skip.reason}${skip.note ? `: ${skip.note}` : ""})`);
       for (const file of lane.unclassified) lines.push(`    report ${file} (changed in the scaffold, not in the manifest)`);
       if (lane.check) {

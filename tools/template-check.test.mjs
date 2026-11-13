@@ -12,6 +12,7 @@ import {
   discoverProjects,
   formatFindings,
   jsonDiff,
+  laneSidePath,
   loadManifest,
   loadSentinel,
   parseTomlSections,
@@ -375,6 +376,13 @@ test("applyPlaceholders: replaces the token on word boundaries only", () => {
   assert.equal(applyPlaceholders("Controllertemplate", "template", "shougong"), "Controllertemplate");
 });
 
+test("laneSidePath: resolves a token-bearing path and leaves a token-free one unchanged", () => {
+  assert.equal(laneSidePath("src/template/telemetry.md", "template", "shougong"), "src/shougong/telemetry.md");
+  assert.equal(laneSidePath("biome.json", "template", "shougong"), "biome.json");
+  assert.equal(laneSidePath("src/templates/notes.md", "template", "shougong"), "src/templates/notes.md");
+  assert.equal(laneSidePath("src/template/telemetry.md", null, "shougong"), "src/template/telemetry.md");
+});
+
 // ---------------------------------------------------------------------------
 // Discovery
 // ---------------------------------------------------------------------------
@@ -675,6 +683,111 @@ test("runChecks: a kept owned file is compared verbatim, not token-substituted",
     [["ahead", "script.sh"]],
   );
   assert.deepEqual(check(make(unkept, "echo chameidor\n")).findings, []);
+});
+
+// ---------------------------------------------------------------------------
+// Lane-side path token substitution
+// ---------------------------------------------------------------------------
+
+// `src/template/telemetry.md` carries the token in a path segment; `src/templates/notes.md`
+// contains it inside a longer word, so the word-boundary rule must leave that alone.
+const TELEMETRY_MANIFEST = [
+  "entries:",
+  "  src/template/telemetry.md: owned",
+  "  src/templates/notes.md: owned",
+  "instantiate:",
+  "  name: template",
+  "",
+].join("\n");
+
+function telemetryFixture({ project = "shougong", files, scaffold } = {}) {
+  return fixture({
+    manifests: { python: TELEMETRY_MANIFEST },
+    scaffoldFiles: {
+      python: scaffold ?? { "src/template/telemetry.md": "contract v1\n", "src/templates/notes.md": "notes v1\n" },
+    },
+    projects: { [project]: { backend: { source: "python", files } } },
+  });
+}
+
+test("runChecks: an owned path containing the token resolves to the lane's instantiated path", () => {
+  const matching = telemetryFixture({
+    files: {
+      "src/shougong/telemetry.md": "contract v1\n",
+      "src/templates/notes.md": "notes v1\n",
+    },
+  });
+  assert.deepEqual(check(matching).findings, []);
+
+  // The lane edits the instantiated path: the lane view must read it, not the token path.
+  const diverged = telemetryFixture({
+    files: {
+      "src/shougong/telemetry.md": "contract v2\n",
+      "src/templates/notes.md": "notes v1\n",
+    },
+  });
+  assert.deepEqual(
+    check(diverged).findings.map((f) => [f.severity, f.file]),
+    [["ahead", "src/template/telemetry.md"]],
+  );
+});
+
+test("runChecks: a project name containing the token still resolves the instantiated path", () => {
+  const fix = telemetryFixture({
+    project: "mytemplate",
+    files: {
+      "src/mytemplate/telemetry.md": "contract v1\n",
+      "src/templates/notes.md": "notes v1\n",
+    },
+  });
+  assert.deepEqual(check(fix).findings, []);
+});
+
+test("runChecks: token-bearing owned paths compare presence on both sides", () => {
+  // The scaffold gained the file since the pin and the lane never had it: queue DRIFT only.
+  const added = telemetryFixture({
+    files: { "src/templates/notes.md": "notes v1\n" },
+    scaffold: { "src/templates/notes.md": "notes v1\n" },
+  });
+  advanceScaffold(added, "python", { "src/template/telemetry.md": "contract v1\n" });
+  assert.deepEqual(
+    check(added).findings.map((f) => [f.severity, f.file, f.message]),
+    [["drift", "src/template/telemetry.md", "scaffold added this file since the applied pin"]],
+  );
+
+  // The pin has the file and the lane removed it from the instantiated path: lane AHEAD.
+  const removed = telemetryFixture({ files: { "src/templates/notes.md": "notes v1\n" } });
+  assert.deepEqual(
+    check(removed).findings.map((f) => [f.severity, f.file, f.message]),
+    [
+      [
+        "ahead",
+        "src/template/telemetry.md",
+        "lane removed this file since the applied pin (local edit - port back, or declare it in allow)",
+      ],
+    ],
+  );
+
+  // The lane has it and the scaffold gained it independently: both views report their side.
+  const both = telemetryFixture({
+    files: {
+      "src/shougong/telemetry.md": "contract v1\n",
+      "src/templates/notes.md": "notes v1\n",
+    },
+    scaffold: { "src/templates/notes.md": "notes v1\n" },
+  });
+  advanceScaffold(both, "python", { "src/template/telemetry.md": "contract v1\n" });
+  assert.deepEqual(
+    check(both).findings.map((f) => [f.severity, f.file, f.message]),
+    [
+      ["drift", "src/template/telemetry.md", "scaffold added this file since the applied pin"],
+      [
+        "ahead",
+        "src/template/telemetry.md",
+        "lane added this file since the applied pin (local edit - port back, or declare it in allow)",
+      ],
+    ],
+  );
 });
 
 test("runChecks: both views at once — the scaffold moved and the lane edited the same entry", () => {
