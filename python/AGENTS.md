@@ -99,8 +99,11 @@ uv run poe test             # everything
 | `mysql.password` | `MYSQL__PASSWORD` | empty |
 | `mysql.database` | `MYSQL__DATABASE` | `template` |
 | `gateways.app.host` | `GATEWAYS__APP__HOST` | unset — derived from `HTTP_PORT` |
+| `telemetry.service_name` | `OTEL_SERVICE_NAME` | `template` (the lane token) |
+| `telemetry.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` in dev; **required in prod** |
+| `telemetry.console` | `TELEMETRY_CONSOLE` | `false` (dev-only console exporters) |
 
-`Settings.app_host` is what the composition root hands `AppHealthGateway`: an explicit `GATEWAYS__APP__HOST` wins (container/deploy), otherwise the self-health URL follows `HTTP_PORT`.
+`Settings.app_host` is what the composition root hands `AppHealthGateway`: an explicit `GATEWAYS__APP__HOST` wins (container/deploy), otherwise the self-health URL follows `HTTP_PORT`. `Settings.telemetry` is the typed reader of the standard `OTEL_*` names — do not read `os.environ` for telemetry anywhere else.
 
 ### Ports (canonical family table)
 
@@ -123,6 +126,8 @@ uv run poe test       # all tests (integration needs Docker)
 ```
 
 Local dev: `docker compose up -d mysql` starts MySQL on host `3306` (or `$MYSQL__PORT`), then `uv run poe run` serves the API on `$HTTP_PORT` (default `8080`, reload in `dev`). `MYSQL__HOST`/`MYSQL__USER`/`MYSQL__PASSWORD`/`MYSQL__DATABASE` default in `settings.py`; a gitignored `.env` overrides them.
+
+Telemetry deploy: uvicorn runs with `--no-access-log` (metrics own per-request volume), and the process sets supervisord `stopwaitsecs=20` so the 10 s SDK flush on `Container.aclose()` completes. The Collector is infra-owned and is **not** shipped here; the prod deploy waits on the host Collector and the per-service env ticket. `TELEMETRY_CONSOLE=true` is the offline dev switch.
 
 Git/PR conventions: see `salgadinhos/global/AGENTS.md`.
 

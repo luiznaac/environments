@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-import { ConfigError, loadManifest, parseYamlLite } from "./template-check.mjs";
+import { ConfigError, laneSidePath, loadManifest, parseYamlLite } from "./template-check.mjs";
 import {
   allocateBlock,
   applyValueOverrides,
@@ -322,6 +322,21 @@ test("rewriteProjectManifest: keeps entries, drops instantiate, never leaves the
   const path = join(makeTree({ "manifest.yml": text }), "manifest.yml");
   assert.deepEqual(loadManifest(path).entries, entries);
   assert.doesNotMatch(text, /instantiate/);
+  assert.doesNotMatch(text, /\btemplate\b/);
+});
+
+test("rewriteProjectManifest: substitutes the token in token-bearing entry paths", () => {
+  const entries = {
+    "src/template/application/telemetry.py": { file: "src/template/application/telemetry.py", class: "owned" },
+    "pyproject.toml": { file: "pyproject.toml", class: "merge", sections: ["tool.ruff"] },
+  };
+  const text = rewriteProjectManifest({ entries, token: "template", name: "shop" });
+  const path = join(makeTree({ "manifest.yml": text }), "manifest.yml");
+  const written = loadManifest(path).entries;
+  assert.deepEqual(written, {
+    "src/shop/application/telemetry.py": { file: "src/shop/application/telemetry.py", class: "owned" },
+    "pyproject.toml": { file: "pyproject.toml", class: "merge", sections: ["tool.ruff"] },
+  });
   assert.doesNotMatch(text, /\btemplate\b/);
 });
 
@@ -900,10 +915,14 @@ test("real scaffold: kotlin creates a renamed lane with the manifest copy and th
   if (process.platform !== "win32") {
     assert.notEqual(statSync(join(lane, "gradlew")).mode & 0o111, 0, "the committed wrapper is executable");
   }
-  assert.deepEqual(
-    loadManifest(join(lane, ".salgadinhos", "manifest.yml")).entries,
-    loadManifest(join(REPO_ROOT, "kotlin", ".salgadinhos", "manifest.yml")).entries,
+  const scaffold = loadManifest(join(REPO_ROOT, "kotlin", ".salgadinhos", "manifest.yml"));
+  const expectedEntries = Object.fromEntries(
+    Object.values(scaffold.entries).map((entry) => {
+      const file = laneSidePath(entry.file, scaffold.instantiate.name, "widget");
+      return [file, { ...entry, file }];
+    }),
   );
+  assert.deepEqual(loadManifest(join(lane, ".salgadinhos", "manifest.yml")).entries, expectedEntries);
   assert.equal(readFileSync(join(root, "widget", ".salgadinhos", "backend.yml"), "utf8").includes("source: kotlin"), true);
 });
 

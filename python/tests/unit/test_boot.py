@@ -27,6 +27,7 @@ def test_main_serves_on_the_configured_http_port(monkeypatch) -> None:
     assert recorded["host"] == "0.0.0.0"
     assert recorded["port"] == 9123
     assert recorded["reload"] is True
+    assert recorded["access_log"] is False
 
 
 def test_main_disables_reload_outside_dev(monkeypatch) -> None:

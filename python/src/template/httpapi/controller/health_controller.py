@@ -13,11 +13,17 @@ from fastapi import APIRouter
 from template.httpapi.schema import HealthCheckResponse
 from template.usecase.commons.asyncx import map_async
 from template.usecase.health.checker import IHealthChecker
+from template.usecase.health.telemetry import HealthTelemetry
 
 
 class HealthController:
-    def __init__(self, health_checkers: Sequence[IHealthChecker]) -> None:
+    def __init__(
+        self,
+        health_checkers: Sequence[IHealthChecker],
+        telemetry: HealthTelemetry | None = None,
+    ) -> None:
         self._health_checkers = health_checkers
+        self._telemetry = telemetry
 
     def router(self) -> APIRouter:
         router = APIRouter(tags=["health"])
@@ -28,6 +34,9 @@ class HealthController:
                 self._health_checkers,
                 lambda checker: checker.get_health_status(),
             )
+            if self._telemetry is not None:
+                for result in results:
+                    self._telemetry.record(result)
             return [HealthCheckResponse.from_domain(result) for result in results]
 
         @router.get("/health/internal")

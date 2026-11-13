@@ -310,7 +310,7 @@ Declare business instruments from the `Meter` the composition root injects into 
 
 ### Telemetry wiring stays at the edge
 
-The OTel API is allowed in `usecase`, mirroring structlog; the SDK, exporters and framework instrumentation are forbidden there — `import-linter` lists `opentelemetry.sdk` and `opentelemetry.exporter` in `usecase`'s `forbidden_modules`.
+The OTel API is allowed in `usecase`, mirroring structlog; the SDK, exporters and framework instrumentation are forbidden there. `import-linter` keeps the framework libraries out, and the Rung-0 static test (`tests/unit/test_architecture.py`) rejects the `opentelemetry.sdk` / `.exporter` / `.instrumentation` subpackages, which the layer contract cannot name directly.
 
 ### The telemetry settings group is a typed reader, not a second naming scheme
 
