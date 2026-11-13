@@ -122,6 +122,10 @@ Note `kotlinx.datetime` sitting in the first block, beside `dev` and `org` — n
 
 - [`CODING_STANDARDS.md`](CODING_STANDARDS.md) — "the language-idiom rules the tooling does not enforce"
 
+## Observability
+
+- [`docs/observability.md`](docs/observability.md) — the normative logging & metrics contract (OpenTelemetry logs + metrics over OTLP, no traces); read it before adding or changing anything that emits telemetry
+
 ## Testing
 
 Kotest `StringSpec` for unit specs and `DescribeSpec` for HTTP/`testApplication` specs, MockK.

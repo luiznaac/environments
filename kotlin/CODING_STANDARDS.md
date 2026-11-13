@@ -243,3 +243,33 @@ Source: *Coding conventions* → Source code organization → Overload layout, a
 Fold the description of parameters and return values into the KDoc prose, linking parameters where they are mentioned; reserve `@param` / `@return` for a description too long to fit the flow.
 
 Source: *Coding conventions* → Documentation comments. `KdocWrapping` and the `UndocumentedPublic*` rules are inactive.
+
+## Observability
+
+`docs/observability.md` is the normative behavior contract for any diff that emits or configures telemetry; these are the idiomatic rules it cannot state as a test.
+
+### Log an event, not prose
+
+Log a stable `<domain>.<action>` event with attributes, never an interpolated sentence; identifiers and values are attributes.
+
+```kotlin
+// Reject — an unstable event name with the value interpolated into it
+log.info("Order $id failed")
+
+// Prefer — a stable name and a bounded attribute
+logger().event("orders.failed", "order.id" to id, throwable = e)
+```
+
+Source: `docs/observability.md` → Log records (record shape, event naming). No lint relates a log call to the event contract.
+
+### Never pass a secret or a body into a logging call
+
+Passwords, tokens, keys, session ids, `Authorization` / `Cookie` headers, request/response bodies and SQL with values never reach a logging call. Pipeline redaction is the backstop, not the mechanism, and it cannot see a secret embedded in a free-text message. PII is allowed when operationally useful.
+
+### Take the `Meter` from the composition root
+
+Declare business instruments from the `Meter` the composition root injects, never `GlobalOpenTelemetry.getMeter(…)` and never a meter built inside `usecase`, so tests get the API's no-op meter and a service keeps one meter scope.
+
+### Telemetry wiring stays at the edge
+
+The OTel API (`io.opentelemetry:opentelemetry-api`, `Meter`) is allowed in `usecase`, mirroring SLF4J. The SDK, exporters, appenders, views and framework instrumentation belong to `application` or the edge module that owns the integration point; the Gradle module graph is the enforcement.
