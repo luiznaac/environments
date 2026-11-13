@@ -275,6 +275,15 @@ export function applyPlaceholders(text, token, projectName) {
   return text.replace(new RegExp(`\\b${escaped}\\b`, "g"), projectName);
 }
 
+// The lane-side counterpart of a manifest entry path. The scaffold side always keeps the token
+// (that is where the file lives); on the lane side a token-bearing path segment resolves to the
+// project's instantiated name — the same word-boundary rule as file content, and rename-free for
+// creation's keep files (creation renames their path segments too, keeping only their content).
+export function laneSidePath(file, token, projectName) {
+  if (!token) return file;
+  return applyPlaceholders(file, token, projectName);
+}
+
 // Deep-compare two JSON values. Returns structured items: paths present only on the left
 // (`left-only`), only on the right (`right-only`) and value changes (`changed`), with both
 // values attached so a view can render its own message.
@@ -726,7 +735,7 @@ function runModeEntry(ctx, entry, manifestPath) {
     project: null,
     pinMode,
     headMode,
-    projectMode: worktreeMode(ctx.projectFile) ?? ctx.laneMode(entry.file),
+    projectMode: worktreeMode(ctx.projectFile) ?? ctx.laneMode(ctx.laneFile),
   });
   for (const message of queue) report(ctx, "drift", message);
   for (const message of lane) report(ctx, "ahead", message);
@@ -748,7 +757,7 @@ function runEntry(ctx, entry, manifestPath) {
     project,
     pinMode: owned ? ctx.modeAtPin(entry.file) : null,
     headMode: owned ? ctx.modeAtHead(entry.file) : null,
-    projectMode: owned ? (worktreeMode(ctx.projectFile) ?? ctx.laneMode(entry.file)) : null,
+    projectMode: owned ? (worktreeMode(ctx.projectFile) ?? ctx.laneMode(ctx.laneFile)) : null,
   });
   for (const message of queue) report(ctx, "drift", message);
   for (const message of lane) report(ctx, "ahead", message);
@@ -874,13 +883,15 @@ export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProj
     }
     scaffoldAt.validate(pin);
     for (const entry of Object.values(manifest.entries)) {
+      const laneFile = laneSidePath(entry.file, manifest.instantiate.name, lane.project);
       runEntry(
         {
           project: lane.project,
           dir: lane.lane,
           file: entry.file,
+          laneFile,
           scaffoldFile: join(environmentsPath, lane.source, entry.file),
-          projectFile: join(codeRoot, lane.project, lane.lane, entry.file),
+          projectFile: join(codeRoot, lane.project, lane.lane, laneFile),
           placeholder: manifest.instantiate.name,
           keep: manifest.instantiate.keep,
           isAllowed: (file) => lane.allow.some((item) => item.entry === file),
