@@ -80,6 +80,10 @@ uv run poe test             # everything
 
 - [`CODING_STANDARDS.md`](CODING_STANDARDS.md) — "the language-idiom rules the tooling does not enforce"
 
+## Observability
+
+- [`docs/observability.md`](docs/observability.md) — the normative logging & metrics contract (OpenTelemetry logs + metrics over OTLP, no traces); read it before adding or changing anything that emits telemetry
+
 ## Configuration
 
 `src/template/application/settings.py` (pydantic-settings, `APP_ENV` profile). Every value has a default; a gitignored `.env` may override locally (see `.env.example`). Nested env vars use `__`:

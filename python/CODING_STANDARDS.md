@@ -281,3 +281,37 @@ Source: AnyIO *Threads* (anyio.readthedocs.io/en/stable/threads.html); this lane
 Read the clock from the injected `IClock`, never `datetime.now()` inside logic, so tests can fix time; log with `get_logger(__name__)` and event-style keys (`_log.info("widgets.listed", count=n)`), never a bare `print`.
 
 Source: this lane's `AGENTS.md` → Architecture; Google Python Style Guide §3.10.1 Logging (do not build a log message eagerly when the logger can do it).
+
+## Observability
+
+`docs/observability.md` is the normative behavior contract for any diff that emits or configures telemetry; these are the idiomatic rules it cannot state as a test.
+
+### Log an event, not prose
+
+Log a stable `<domain>.<action>` event with keyword attributes, never an interpolated sentence; identifiers and values are attributes.
+
+```python
+# Reject — an unstable event name with the value interpolated into it
+_log.info(f"Order {order_id} failed")
+
+# Prefer — a stable name and a bounded attribute
+_log.info("orders.failed", order_id=order_id, exc_info=error)
+```
+
+Source: `docs/observability.md` → Log records (record shape, event naming). No lint relates a log call to the event contract.
+
+### Never pass a secret or a body into a logging call
+
+Passwords, tokens, keys, session ids, `Authorization` / `Cookie` headers, request/response bodies and SQL with values never reach a logging call. Pipeline redaction is the backstop, not the mechanism, and it cannot see a secret embedded in a free-text message. PII is allowed when operationally useful.
+
+### Take the `Meter` from the composition root
+
+Declare business instruments from the `Meter` the composition root injects into the service, never from a module-level provider and never from a meter built inside `usecase`, so tests get the API's no-op meter and a service keeps one meter scope.
+
+### Telemetry wiring stays at the edge
+
+The OTel API is allowed in `usecase`, mirroring structlog; the SDK, exporters and framework instrumentation are forbidden there — `import-linter` lists `opentelemetry.sdk` and `opentelemetry.exporter` in `usecase`'s `forbidden_modules`.
+
+### The telemetry settings group is a typed reader, not a second naming scheme
+
+`settings.telemetry` reads the standard `OTEL_*` names and the three app-owned keys, types them once, and nothing else reads `os.environ` for telemetry.

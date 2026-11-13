@@ -13,6 +13,8 @@ entries:
   AGENTS.md: judgment
   # A lane hand-authors its own map; a scaffold change here is a porting judgment, never an overwrite.
   docs/code-map.md: judgment
+  # The telemetry standard every lane is reviewed against; the scaffold owns the text.
+  docs/observability.md: owned
   CODING_STANDARDS.md: owned
   pyproject.toml:
     class: merge
