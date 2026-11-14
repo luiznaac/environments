@@ -327,7 +327,11 @@ export function updateSentinelText(text, { revision, scaffoldSha, observedAllows
     let end = start + 1;
     while (end < lines.length && lines[end].trim() !== "" && (lines[end].match(/^\s*/) ?? [""])[0].length > indent) end++;
     if (lines.slice(start + 1, end).some((line) => /^\s*seen_in\s*:/.test(line))) continue;
-    const propertyIndent = end > start + 1 ? (lines[end - 1].match(/^\s*/) ?? [""])[0].length : indent + 2;
+    // A block-scalar reason's continuation lines are indented deeper than the item's properties;
+    // anchoring to the last line would put `seen_in` inside the folded text, so use the first
+    // property line's own indent.
+    const firstProperty = lines.slice(start + 1, end).find((line) => /^\s*[A-Za-z_][\w-]*\s*:/.test(line));
+    const propertyIndent = firstProperty ? (firstProperty.match(/^\s*/) ?? [""])[0].length : indent + 2;
     lines.splice(end, 0, `${" ".repeat(propertyIndent)}seen_in: ${scaffoldSha}`);
   }
   return withEol(ensureTrailingNewline(lines.join("\n")), eol);
@@ -703,7 +707,7 @@ function runRepo({ project, lanes, environmentsPath, codeRoot, target, dryRun, s
   else git(cloneDir, ["checkout", "--quiet", "-b", report.branch], { env: gitEnv });
 
   const plans = lanes
-    .map((laneSpec) => planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, projectName: project, gitEnv, bootstrap }))
+    .map((laneSpec) => planLane({ laneSpec, cloneDir, environmentsPath, target, manifestFor, projectName: laneSpec.projectName ?? project, gitEnv, bootstrap }))
     .filter((plan) => plan !== null);
   report.lanes = plans;
   if (plans.every((plan) => plan.pin === target)) {
@@ -795,13 +799,13 @@ export function runPropagate(options = {}) {
   const target = resolveCommit(environmentsPath, targetRef ?? "HEAD", gitEnv);
   const byProject = new Map();
   if (bootstrapLanes) {
-    byProject.set(onlyProject, bootstrapLanes.map(({ dir, source }) => ({ lane: dir, source, sentinelFile: `${sentinelFileName(dir)}.yml` })));
+    byProject.set(onlyProject, bootstrapLanes.map(({ dir, source }) => ({ lane: dir, source, sentinelFile: `${sentinelFileName(dir)}.yml`, projectName: null })));
   } else {
     const discovered = discoverProjects(environmentsPath, codeRoot);
     const selected = onlyProject ? discovered.filter((lane) => lane.project === onlyProject) : discovered;
     for (const lane of selected) {
       if (!byProject.has(lane.project)) byProject.set(lane.project, []);
-      byProject.get(lane.project).push({ lane: lane.lane, sentinelFile: basename(lane.sentinelPath) });
+      byProject.get(lane.project).push({ lane: lane.lane, sentinelFile: basename(lane.sentinelPath), projectName: lane.projectName });
     }
   }
 

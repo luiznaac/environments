@@ -53,8 +53,10 @@ function gitIn(dir, args) {
   return result.stdout.trim();
 }
 
-function sentinelYaml({ source, lane, allow = [], revision = 1, scaffoldSha }) {
-  let text = `source: ${source}\nlane: ${lane}\napplied:\n  revision: ${revision}\n  scaffold_sha: ${scaffoldSha}\n`;
+function sentinelYaml({ source, lane, name, allow = [], revision = 1, scaffoldSha }) {
+  let text = `source: ${source}\nlane: ${lane}\n`;
+  if (name) text += `name: ${name}\n`;
+  text += `applied:\n  revision: ${revision}\n  scaffold_sha: ${scaffoldSha}\n`;
   if (allow.length > 0) {
     text += "allow:\n";
     for (const item of allow) {
@@ -118,7 +120,7 @@ function fixture({ manifests = { react: realManifest("react") }, scaffoldFiles =
     for (const [lane, spec] of Object.entries(lanes)) {
       const sentinelPath = join(root, project, ".salgadinhos", `${lane}.yml`);
       mkdirSync(dirname(sentinelPath), { recursive: true });
-      writeFileSync(sentinelPath, sentinelYaml({ source: spec.source, lane, allow: spec.allow, revision: spec.revision ?? 1, scaffoldSha: spec.pin ?? pin }));
+      writeFileSync(sentinelPath, sentinelYaml({ source: spec.source, lane, name: spec.name, allow: spec.allow, revision: spec.revision ?? 1, scaffoldSha: spec.pin ?? pin }));
       for (const [rel, content] of Object.entries(spec.files)) {
         const path = join(root, project, lane, rel);
         mkdirSync(dirname(path), { recursive: true });
@@ -203,6 +205,35 @@ test("parseYamlLite: quoted scalars keep colons, commas and hashes", () => {
   const parsed = parseYamlLite('a: "x: y, z # n"\nb: [ "p, q", r ]\n');
   assert.equal(parsed.a, "x: y, z # n");
   assert.deepEqual(parsed.b, ["p, q", "r"]);
+});
+
+test("parseYamlLite: folded and literal block scalars (sentinel allow reasons)", () => {
+  const folded = parseYamlLite(`
+allow:
+  - entry: AGENTS.md
+    reason: >-
+      keep the project's own wording
+      and the lane's own layout
+  - entry: biome.json
+    reason: "divergence by design"
+`);
+  assert.deepEqual(folded.allow, [
+    { entry: "AGENTS.md", reason: "keep the project's own wording and the lane's own layout" },
+    { entry: "biome.json", reason: "divergence by design" },
+  ]);
+
+  const clipped = parseYamlLite("reason: >\n  one line\n");
+  assert.equal(clipped.reason, "one line\n");
+
+  const literal = parseYamlLite("reason: |-\n  first\n  second\n");
+  assert.equal(literal.reason, "first\nsecond");
+
+  const literalClip = parseYamlLite("reason: |\n  first\n  second\n");
+  assert.equal(literalClip.reason, "first\nsecond\n");
+
+  const emptyBody = parseYamlLite("reason: >-\nnext: 1\n");
+  assert.equal(emptyBody.reason, "");
+  assert.equal(emptyBody.next, "1");
 });
 
 // ---------------------------------------------------------------------------
@@ -419,6 +450,26 @@ test("discoverProjects: sentinel without lane falls back to the file name", () =
     projects.map((project) => [project.project, project.lane]),
     [["chameidor", "frontend"]],
   );
+});
+
+test("discoverProjects: a sentinel name overrides the checkout directory", () => {
+  const fix = fixture({
+    projects: { "portfolio-2": { backend: { source: "react", name: "portfolio", files: reactProject() } } },
+  });
+  const projects = discoverProjects(fix.environments, fix.root);
+  assert.deepEqual(
+    projects.map((project) => [project.project, project.projectName]),
+    [["portfolio-2", "portfolio"]],
+  );
+  assert.equal(loadSentinel(projects[0].sentinelPath).name, "portfolio");
+});
+
+test("discoverProjects: sentinel without name falls back to the checkout directory", () => {
+  const fix = fixture({
+    projects: { shougong: { backend: { source: "react", files: reactProject() } } },
+  });
+  const projects = discoverProjects(fix.environments, fix.root);
+  assert.equal(projects[0].projectName, "shougong");
 });
 
 test("discoverProjects: sentinel without source is a config error", () => {
@@ -700,13 +751,13 @@ const TELEMETRY_MANIFEST = [
   "",
 ].join("\n");
 
-function telemetryFixture({ project = "shougong", files, scaffold } = {}) {
+function telemetryFixture({ project = "shougong", projectName, files, scaffold } = {}) {
   return fixture({
     manifests: { python: TELEMETRY_MANIFEST },
     scaffoldFiles: {
       python: scaffold ?? { "src/template/telemetry.md": "contract v1\n", "src/templates/notes.md": "notes v1\n" },
     },
-    projects: { [project]: { backend: { source: "python", files } } },
+    projects: { [project]: { backend: { source: "python", name: projectName, files } } },
   });
 }
 
@@ -730,6 +781,30 @@ test("runChecks: an owned path containing the token resolves to the lane's insta
     check(diverged).findings.map((f) => [f.severity, f.file]),
     [["ahead", "src/template/telemetry.md"]],
   );
+});
+
+test("runChecks: a sentinel name resolves the instantiated path when the checkout directory differs", () => {
+  const fix = telemetryFixture({
+    project: "portfolio-2",
+    projectName: "portfolio",
+    files: {
+      "src/portfolio/telemetry.md": "contract v1\n",
+      "src/templates/notes.md": "notes v1\n",
+    },
+  });
+  assert.deepEqual(check(fix).findings, []);
+});
+
+test("runChecks: a sentinel name substitutes the token in owned content, not just paths", () => {
+  const manifest = ["entries:", "  config.txt: owned", "instantiate:", "  name: template", ""].join("\n");
+  const fix = fixture({
+    manifests: { python: manifest },
+    scaffoldFiles: { python: { "config.txt": "service=template\n" } },
+    projects: {
+      "portfolio-2": { backend: { source: "python", name: "portfolio", files: { "config.txt": "service=portfolio\n" } } },
+    },
+  });
+  assert.deepEqual(check(fix).findings, []);
 });
 
 test("runChecks: a project name containing the token still resolves the instantiated path", () => {

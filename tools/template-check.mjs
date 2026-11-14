@@ -12,8 +12,9 @@
 // Sources of truth (nothing is hardcoded here):
 //   - `environments/<stack>/.salgadinhos/manifest.yml` — `entries` (path -> class) and
 //     `instantiate` (the scaffold's own name token).
-//   - `<project>/.salgadinhos/<lane>.yml` — sentinel: `source`, `lane`, `applied` (the pin,
-//     `scaffold_sha`), `allow`. Projects are discovered by globbing for these.
+//   - `<project>/.salgadinhos/<lane>.yml` — sentinel: `source`, `lane`, optional `name`
+//     (the instantiated project name when it differs from the checkout directory),
+//     `applied` (the pin, `scaffold_sha`), `allow`. Projects are discovered by globbing for these.
 //   - The environments checkout's git history — the pin side of the queue and lane views.
 //
 // What it compares, derived from each entry's class:
@@ -55,8 +56,9 @@ export const VALUE_PLACEHOLDER = "{{value}}";
 // ---------------------------------------------------------------------------
 // YAML-lite: exactly the subset the manifests and sentinels use — nested maps
 // by indentation, block sequences, inline flow sequences, quoted or plain
-// scalars, comments, `{}` and `null`. No anchors, multi-line scalars, flow
-// maps or explicit tags; keep the files within that subset.
+// scalars, folded (`>`) and literal (`|`) block scalars, comments, `{}` and
+// `null`. No anchors, flow maps or explicit tags; keep the files within that
+// subset.
 // ---------------------------------------------------------------------------
 
 function stripComment(line) {
@@ -145,6 +147,31 @@ function splitKeyValue(text, line) {
   return { key: unquote(text.slice(0, colon).trim()), rest: text.slice(colon + 1).trim() };
 }
 
+function isBlockScalarHeader(rest) {
+  return /^[>|][+-]?$/.test(rest);
+}
+
+// The lite subset the sentinels use: a folded (`>`) or literal (`|`) block whose lines are more
+// indented than the key. Leading indentation and blank lines are not preserved (the pre-pass
+// trims and drops them), so this reads a single-paragraph scalar; `-` strips the trailing newline.
+function parseBlockScalar(header, lines, state, parentIndent) {
+  const folded = header[0] === ">";
+  const strip = header.includes("-");
+  const collected = [];
+  let blockIndent = null;
+  while (state.pos < lines.length) {
+    const line = lines[state.pos];
+    if (line.indent <= parentIndent) break;
+    if (blockIndent === null) blockIndent = line.indent;
+    if (line.indent < blockIndent) break;
+    collected.push(line.text);
+    state.pos++;
+  }
+  if (collected.length === 0) return "";
+  const joined = folded ? collected.join(" ") : collected.join("\n");
+  return strip ? joined : `${joined}\n`;
+}
+
 function resolveValue(rest, lines, state, parentIndent, line) {
   if (rest === "") {
     const next = lines[state.pos];
@@ -154,6 +181,7 @@ function resolveValue(rest, lines, state, parentIndent, line) {
   if (rest === "{}") return {};
   if (rest === "[]") return [];
   if (rest.startsWith("[")) return parseFlowSequence(rest, line);
+  if (isBlockScalarHeader(rest)) return parseBlockScalar(rest, lines, state, parentIndent);
   return parseScalar(rest);
 }
 
@@ -499,6 +527,9 @@ export function loadSentinel(sentinelPath) {
     throw new ConfigError(`sentinel ${sentinelPath}: missing 'source' (the scaffold this lane derives from)`);
   }
   const lane = typeof parsed?.lane === "string" && parsed.lane !== "" ? parsed.lane : basename(sentinelPath).replace(/\.ya?ml$/, "");
+  // The instantiated project name when it differs from the checkout directory (`portfolio-2`
+  // carries the `portfolio` package); absent means the directory name.
+  const name = typeof parsed?.name === "string" && parsed.name !== "" ? parsed.name : null;
   const allow = [];
   if (parsed?.allow != null) {
     if (!Array.isArray(parsed.allow)) throw new ConfigError(`sentinel ${sentinelPath}: 'allow' must be a list`);
@@ -532,7 +563,7 @@ export function loadSentinel(sentinelPath) {
       applied.scaffoldSha = rawApplied.scaffold_sha;
     }
   }
-  return { source, lane, allow, applied };
+  return { source, lane, name, allow, applied };
 }
 
 // ---------------------------------------------------------------------------
@@ -553,7 +584,7 @@ export function discoverProjects(environmentsPath, codeRoot) {
     for (const file of sentinels) {
       const sentinelPath = join(sentinelDir, file);
       const sentinel = loadSentinel(sentinelPath);
-      projects.push({ project: dirent.name, lane: sentinel.lane, source: sentinel.source, allow: sentinel.allow, applied: sentinel.applied, sentinelPath });
+      projects.push({ project: dirent.name, projectName: sentinel.name ?? dirent.name, lane: sentinel.lane, source: sentinel.source, allow: sentinel.allow, applied: sentinel.applied, sentinelPath });
     }
   }
   projects.sort((a, b) => a.project.localeCompare(b.project) || a.lane.localeCompare(b.lane));
@@ -685,7 +716,7 @@ function compareEntryViews(ctx, entry, { pin, head, project, pinMode, headMode, 
   // `instantiate.keep` names files where the scaffold's token is legitimately part of the file
   // (e.g. the Gradle wrapper's template comment), so they are compared and applied verbatim,
   // without placeholder substitution. A `watch: mode` entry never reaches the content path.
-  const substitute = (text) => (text != null && ctx.placeholder && !ctx.kept ? applyPlaceholders(text, ctx.placeholder, ctx.project) : text);
+  const substitute = (text) => (text != null && ctx.placeholder && !ctx.kept ? applyPlaceholders(text, ctx.placeholder, ctx.projectName) : text);
   const side = (text, mode) => ({ text, mode });
   const queue = [];
   const lane = [];
@@ -883,10 +914,11 @@ export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProj
     }
     scaffoldAt.validate(pin);
     for (const entry of Object.values(manifest.entries)) {
-      const laneFile = laneSidePath(entry.file, manifest.instantiate.name, lane.project);
+      const laneFile = laneSidePath(entry.file, manifest.instantiate.name, lane.projectName);
       runEntry(
         {
           project: lane.project,
+          projectName: lane.projectName,
           dir: lane.lane,
           file: entry.file,
           laneFile,
