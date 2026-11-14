@@ -8,3 +8,8 @@ mysql:
   user: ${MYSQL_USER}
   password: ${MYSQL_PASSWORD}
   database: ${MYSQL_DATABASE:template}
+
+telemetry:
+  service-name: ${OTEL_SERVICE_NAME:template}
+  endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:}
+  console: ${TELEMETRY_CONSOLE:false}

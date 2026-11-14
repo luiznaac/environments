@@ -6,6 +6,9 @@ kotest = "5.9.1"
 jackson = "2.20.0"
 ktor = "3.3.1"
 exposed = "1.0.0-rc-1"
+opentelemetry = "1.67.0"
+opentelemetry-instrumentation = "2.33.1-alpha"
+logstash-logback-encoder = "8.1"
 
 [libraries]
 kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version = "2.2.20" }
@@ -24,6 +27,17 @@ ktor-server-test-host = { module="io.ktor:ktor-server-test-host", version.ref = 
 ktor-client-core = { module="io.ktor:ktor-client-core", version.ref = "ktor"}
 ktor-client-cio = { module="io.ktor:ktor-client-cio", version.ref = "ktor"}
 ktor-client-content-negotiation = { module="io.ktor:ktor-client-content-negotiation", version.ref = "ktor"}
+ktor-client-mock = { module="io.ktor:ktor-client-mock", version.ref = "ktor"}
+
+opentelemetry-api = { module="io.opentelemetry:opentelemetry-api", version.ref = "opentelemetry" }
+opentelemetry-sdk = { module="io.opentelemetry:opentelemetry-sdk", version.ref = "opentelemetry" }
+opentelemetry-exporter-otlp = { module="io.opentelemetry:opentelemetry-exporter-otlp", version.ref = "opentelemetry" }
+opentelemetry-exporter-logging = { module="io.opentelemetry:opentelemetry-exporter-logging", version.ref = "opentelemetry" }
+opentelemetry-sdk-testing = { module="io.opentelemetry:opentelemetry-sdk-testing", version.ref = "opentelemetry" }
+opentelemetry-ktor = { module="io.opentelemetry.instrumentation:opentelemetry-ktor-3.0", version.ref = "opentelemetry-instrumentation" }
+opentelemetry-runtime-telemetry = { module="io.opentelemetry.instrumentation:opentelemetry-runtime-telemetry", version.ref = "opentelemetry-instrumentation" }
+opentelemetry-logback-appender = { module="io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0", version.ref = "opentelemetry-instrumentation" }
+logstash-logback-encoder = { module="net.logstash.logback:logstash-logback-encoder", version.ref = "logstash-logback-encoder" }
 
 exposed-core = { module="org.jetbrains.exposed:exposed-core", version.ref = "exposed" }
 exposed-dao = { module="org.jetbrains.exposed:exposed-dao", version.ref = "exposed" }

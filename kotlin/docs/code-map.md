@@ -6,10 +6,14 @@ Module → key files → seam index, plus the app entry points; seeded from the 
 
 ### `usecase` — domain models, ports and services
 **Purpose**: the core the other layers implement against; owns the health-check feature (the `HealthChecker` port, the `HealthGateway` outbound port, the `HealthCheckResult` model) plus the shared `commons/` helpers and the `configuration/` beans. Depends on nothing infrastructural — no Ktor, Exposed or Spring web types.
-**Files**: `usecase/src/main/kotlin/dev/agner/template/usecase/health/{HealthChecker,HealthGateway,HealthCheckResult}.kt`; `usecase/src/main/kotlin/dev/agner/template/usecase/commons/{DomainException,CommonDefinitions,CommonExtensions}.kt`; `usecase/src/main/kotlin/dev/agner/template/usecase/configuration/{JsonMapper,TimeProviderConfig}.kt` and `configuration/serializers/*`; `usecase/src/testFixtures/kotlin/dev/agner/template/usecase/BasicHelpers.kt`
+**Files**: `usecase/src/main/kotlin/dev/agner/template/usecase/health/{HealthChecker,HealthGateway,HealthCheckResult,HealthTelemetry}.kt`; `usecase/src/main/kotlin/dev/agner/template/usecase/commons/{DomainException,CommonDefinitions,CommonExtensions,RequestContext,TelemetryLogging,TelemetryAttributes,MetricCatalog}.kt`; `usecase/src/main/kotlin/dev/agner/template/usecase/configuration/{JsonMapper,TimeProviderConfig}.kt` and `configuration/serializers/*`; `usecase/src/testFixtures/kotlin/dev/agner/template/usecase/BasicHelpers.kt`
 **Seam(s)**:
 - **`HealthChecker`** (`health/HealthChecker.kt`) — the inbound port every checker implements (`suspend getHealthStatus(): HealthCheckResult`); `http-api`'s `HealthHandler` collects the whole `Set<HealthChecker>` Spring builds.
 - **`HealthGateway`** (`health/HealthGateway.kt`) — the outbound port (`suspend isHealthy(): Boolean`), implemented by `gateway`'s `AppHealthGateway` and consumed by `HttpClientHealthCheck`.
+- **`HealthTelemetry`** (`health/HealthTelemetry.kt`) — the `health.check.status` gauge / `health.check.failures` counter and the one WARN/INFO transition log; `HealthHandler` records each result after the checkers resolve.
+- **`RequestContext`** (`commons/RequestContext.kt`) — the request/job correlation that rides the coroutine and mirrors into MDC; resolve validates the inbound header, otherwise generates the UUIDv4.
+- **`TelemetryLogging.event()`** (`commons/TelemetryLogging.kt`) — the structured-log call site: message = event name, attributes MDC-scoped and cleared synchronously.
+- **`MetricCatalog` / `TelemetryAttributes`** — the single catalog of metric names/units/buckets and semconv attribute keys that the SDK wiring and the contract tests both consume.
 - **`DomainException`** (`commons/DomainException.kt`) — the error shape crossing to `http-api` (`error` / `userMessage` / `detail`, no HTTP knowledge); subclasses are mapped to statuses at the edge.
 - **`configuration/JsonMapper.kt`** — the single Jackson `ObjectMapper` (kotlinx date/period serializers, `SNAKE_CASE`) shared by the HTTP server and the outbound client; in a generated project that also ships a frontend, a DTO change updates its `frontend/src/api/types.ts` in the same commit.
 - **`configuration/TimeProviderConfig.kt`** — the `Clock` bean; logic reads time through the `commons` `now(clock)` extensions, never `Clock.system*` directly, so tests can fix time.
@@ -27,19 +31,21 @@ Module → key files → seam index, plus the app entry points; seeded from the 
 **Files**: `gateway/src/main/kotlin/dev/agner/template/gateway/configuration/KtorClientConfig.kt`; `gateway/src/main/kotlin/dev/agner/template/gateway/health/{AppHealthGateway,HttpClientHealthCheck}.kt`
 **Seam(s)**:
 - **Gateway seam** — `AppHealthGateway` implements `usecase`'s `HealthGateway` over the shared Ktor `HttpClient` produced by `KtorClientConfig` (Jackson content negotiation); `HttpClientHealthCheck` implements `HealthChecker` on top of that port.
+- **Client telemetry seam** — `configureTelemetry` installs `KtorClientTelemetry` (the `http.client.request.duration` histogram) and the `RequestIdPropagation` client plugin that copies the coroutine's `request.id` onto every outbound `X-Request-ID`; a new outbound integration gets both for free by using the shared client.
 - A new integration adds the port in `usecase` and its `@Component` adapter here — nothing in `http-api` changes.
 
 ### `http-api` — Ktor routes and edge adapters
 **Purpose**: the HTTP surface — controllers, content negotiation, CORS and the domain-exception mapping.
-**Files**: `http-api/src/main/kotlin/dev/agner/template/httpapi/controller/{ControllerTemplate,HealthController}.kt`; `http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/{KtorConfig,DomainExceptionHandling,DomainExceptionStatusMapper}.kt`; `http-api/src/test/kotlin/dev/agner/template/httpapi/configuration/DomainExceptionHandlingTest.kt`
+**Files**: `http-api/src/main/kotlin/dev/agner/template/httpapi/controller/{ControllerTemplate,HealthController}.kt`; `http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/{KtorConfig,DomainExceptionHandling,DomainExceptionStatusMapper,RequestTelemetry}.kt`; `http-api/src/test/kotlin/dev/agner/template/httpapi/configuration/{DomainExceptionHandlingTest,RequestTelemetryTest}.kt`
 **Seam(s)**:
 - **Route seam** — `ControllerTemplate.routes()` (`typealias RouteDefinition = Routing.() -> Unit`); `KtorConfig` injects `Set<ControllerTemplate>` and mounts each, so adding an endpoint is adding a controller and no manual registration.
 - **Error-body seam** — `installDomainExceptionHandler` is the one `StatusPages` handler building the `{"error","message","detail"}` body; `DomainExceptionStatusMapper` chooses the status (defaults to `400`).
+- **Request telemetry seam** — `RequestTelemetry.install` runs before routing: it resolves/echoes `X-Request-ID`, binds the `RequestContext`, installs `KtorServerTelemetry` (the `http.server.request.duration` histogram), keeps `http.server.active_requests` honest, and emits the single WARN/ERROR boundary record per 4xx/5xx. Success is silent.
 
 ### `application` — composition root
 **Purpose**: the Spring Boot entry and the runtime configuration that wires the modules together.
-**Files**: `application/src/main/kotlin/dev/agner/template/application/Boot.kt`; `application/src/main/resources/application.yaml`, `application-prod.yaml`, `logback.xml`; `application/build.gradle.kts`
-**Seam(s)**: `Boot.kt`'s `@ComponentScan("dev.agner.template")` is the wiring seam — every `@Component`/`@Service`/`@Configuration` is picked up, so a new class needs no registration. `application.yaml` is the config seam (`ktor.port` from `KTOR_PORT`, fixed `ktor.wait: true`, `mysql.*` from `MYSQL_*`, `mysql.database` from `MYSQL_DATABASE` with a `template` default).
+**Files**: `application/src/main/kotlin/dev/agner/template/application/Boot.kt`; `application/src/main/kotlin/dev/agner/template/application/telemetry/{Telemetry,TelemetryConfig,TelemetryResource,TelemetryViews,RedactingMdcFilter,TelemetryJsonProviders}.kt`; `application/src/main/resources/application.yaml`, `application-prod.yaml`, `logback-spring.xml`; `application/build.gradle.kts`
+**Seam(s)**: `Boot.kt`'s `@ComponentScan("dev.agner.template")` is the wiring seam — every `@Component`/`@Service`/`@Configuration` is picked up, so a new class needs no registration. `application.yaml` is the config seam (`ktor.port` from `KTOR_PORT`, fixed `ktor.wait: true`, `mysql.*` from `MYSQL_*`, `mysql.database` from `MYSQL_DATABASE` with a `template` default, and the three `telemetry.*` keys). `TelemetryConfig` is the telemetry seam: it resolves `TelemetrySettings` (prod requires the endpoint; dev defaults it; the test profile exports nothing), builds the SDK with the resource/views/exporters, installs the Logback appender and flushes on shutdown; `RedactingMdcFilter` is the single redaction chokepoint ahead of both renderers; `logback-spring.xml` carries the dev console and the prod single-line JSON.
 
 ### `integrationTest` — full-stack test harness
 **Purpose**: end-to-end specs that boot the real app against a real MySQL and stubbed external gateways.
@@ -54,6 +60,7 @@ Module → key files → seam index, plus the app entry points; seeded from the 
 ## Entry points
 
 - `application/src/main/kotlin/dev/agner/template/application/Boot.kt` — `main()`; Spring Boot component-scans `dev.agner.template` and starts the process.
-- `http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/KtorConfig.kt` — the HTTP route table: mounts every `ControllerTemplate`, installs content negotiation, CORS and the domain-exception handler, and blocks the main thread (`ktor.wait: true`).
+- `application/src/main/kotlin/dev/agner/template/application/telemetry/TelemetryConfig.kt` — the telemetry composition root: builds the SDK from the Spring `Environment`, exposes `OpenTelemetry`/`Meter`/`HealthTelemetry`, and flushes on SIGTERM via `DisposableBean`.
+- `http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/KtorConfig.kt` — the HTTP route table: installs request telemetry before mounting every `ControllerTemplate`, installs content negotiation, CORS and the domain-exception handler, and blocks the main thread (`ktor.wait: true`).
 - `persistence/src/main/kotlin/dev/agner/template/persistence/migration/Migrator.kt` — `main()` (and `migrate(...)`); the Flyway migrator the integration harness calls and the manual/local entry for applying `db/migration/V*.sql`.
 - `integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/MySqlContainerExtension.kt` — the integration suite's entry: Testcontainers MySQL, published coordinates and app port, plus a migrate to head; `IntegrationTest` then boots the app in-process.

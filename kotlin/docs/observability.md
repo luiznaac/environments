@@ -207,7 +207,7 @@ Attributes kept: `http.request.method`, `http.route`, `http.response.status_code
 Official library instrumentation — **no agent, no Micrometer OTLP registry, no Prometheus registry, no `/metrics`**.
 
 - Server/client: `io.opentelemetry.instrumentation:opentelemetry-ktor-3.0` (`KtorServerTelemetry`, `KtorClientTelemetry`); `opentelemetry-hikaricp-3.0` only where a Hikari pool exists (never in this lane — Exposed's url connect is pool-less).
-- Runtime: `opentelemetry-runtime-telemetry-java21`, experimental metrics off (`emit-experimental-metrics=false`, empty JFR selection). Required subset: `jvm.memory.used`, `jvm.memory.limit`, `jvm.gc.duration`, `jvm.thread.count`, `jvm.cpu.recent_utilization`, `jvm.class.count`; the artifact's other stable `jvm.*` instruments may stay. No hand-written runtime instruments.
+- Runtime: `io.opentelemetry.instrumentation:opentelemetry-runtime-telemetry` (the JDK 8/17/21 artifact; `opentelemetry-runtime-telemetry-java21` was never published), experimental metrics off (`emit-experimental-metrics=false`, empty JFR selection). Required subset: `jvm.memory.used`, `jvm.memory.limit`, `jvm.gc.duration`, `jvm.thread.count`, `jvm.cpu.recent_utilization`, `jvm.class.count`; the artifact's other stable `jvm.*` instruments may stay. No hand-written runtime instruments.
 - Spans these instrumentations create internally are no-ops without a `TracerProvider`; the metrics are recorded regardless.
 
 ### Database
@@ -242,6 +242,7 @@ OTLP/HTTP, **cumulative** temporality, 60 s periodic reader, explicit-bucket his
 
 | Piece | Module | File |
 |---|---|---|
+| Metric names/units/buckets and semconv attribute keys, shared by wiring and tests | `usecase` | `commons/MetricCatalog.kt`, `commons/TelemetryAttributes.kt` (new) |
 | Request-id carrier (`AbstractCoroutineContextElement` + key) | `usecase` | `commons/RequestContext.kt` (new) |
 | Structured log call (`event(name, vararg attrs, throwable?)`, MDC-scoped) | `usecase` | `commons/TelemetryLogging.kt` (new) |
 | Health instruments + transition logs | `usecase` | `health/HealthTelemetry.kt` (new) |
@@ -280,7 +281,7 @@ Four rungs, proportional. **A green rung is not acceptance on its own.**
 
 Rung 1 without Rung 2 proves the record is built, not exported. Rung 2 without Rung 1 proves one run, not the contract.
 
-**Gates:** `./gradlew unitTest --no-daemon` (fast, Docker-free, also the pre-commit lane) and `./gradlew clean build` (CI). No new CI job, no service container, no new dependency except `testImplementation("io.opentelemetry:opentelemetry-sdk-testing")` (`InMemoryMetricReader`, `InMemoryLogRecordExporter`) in each module that asserts.
+**Gates:** `./gradlew unitTest --no-daemon` (fast, Docker-free, also the pre-commit lane) and `./gradlew clean build` (CI). No new CI job and no service container. The production dependencies are `opentelemetry-api` (the only OTel artifact in `usecase`), `opentelemetry-sdk`, `opentelemetry-exporter-otlp`, `opentelemetry-exporter-logging`, `opentelemetry-logback-appender-1.0`, `opentelemetry-runtime-telemetry`, `opentelemetry-ktor-3.0` (the edge modules) and `logstash-logback-encoder`; each module that asserts adds `testImplementation("io.opentelemetry:opentelemetry-sdk-testing")` (`InMemoryMetricReader`, `InMemoryLogRecordExporter`).
 
 ### Clause → test matrix (normative)
 
@@ -389,6 +390,8 @@ Same contract, different wiring. Put `config/telemetry/` files (`Telemetry`, `Te
 | Artifact | Class |
 |---|---|
 | `docs/observability.md`, `CODING_STANDARDS.md` additions | **owned** (token-free paths) |
+| `usecase` telemetry primitives (`commons/{MetricCatalog,TelemetryAttributes,RequestContext,TelemetryLogging}.kt`, `health/HealthTelemetry.kt`) | **owned** |
+| The Kotlin contract suite (`TelemetryConfigTest`, `RedactingMdcFilterTest`, `TelemetryLoggingTest`, `RequestContextTest`, `HealthTelemetryTest`, `RequestTelemetryTest`, `ClientTelemetryTest`) | **owned** — the clause matrix travels with the primitives |
 | `docs/observability-waivers.md` (created when a lane needs one) | judgment — lane-owned; a scaffold pass must never overwrite it |
 | telemetry source modules, `logback-spring.xml`, `application/telemetry/*` | **owned** for chameidor/portfolio-2; **label-follower declares an `allow`** per entry (no `application`/`usecase`/`http-api` modules, `com.rafaelfo` package) and ports them by judgment |
 | existing integration points (`KtorConfig`, `KtorClientConfig`, `DomainExceptionHandling`, `HealthController`) | judgment |
