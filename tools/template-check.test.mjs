@@ -201,36 +201,74 @@ allow:
   ]);
 });
 
+test("parseYamlLite: folded block scalar in a sentinel allow reason", () => {
+  const parsed = parseYamlLite(`
+allow:
+  - entry: http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/RequestTelemetry.kt
+    reason: >-
+      The scaffold file couples the boundary record to DomainException;
+      chameidor has no domain-error type and drives the 4xx WARN from the
+      response status instead.
+  - entry: other.kt
+    reason: plain
+`);
+  assert.equal(parsed.allow.length, 2);
+  assert.equal(
+    parsed.allow[0].entry,
+    "http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/RequestTelemetry.kt",
+  );
+  assert.equal(
+    parsed.allow[0].reason,
+    "The scaffold file couples the boundary record to DomainException; chameidor has no domain-error type and drives the 4xx WARN from the response status instead.",
+  );
+  assert.equal(parsed.allow[1].reason, "plain");
+});
+
+test("parseYamlLite: literal block scalar keeps line breaks and clips one trailing newline", () => {
+  const parsed = parseYamlLite(`
+note: |
+  line one
+  line two
+`);
+  assert.equal(parsed.note, "line one\nline two\n");
+});
+
+test("parseYamlLite: block scalar strip chomping removes the trailing newline", () => {
+  const parsed = parseYamlLite(`
+note: |-
+  line one
+  line two
+`);
+  assert.equal(parsed.note, "line one\nline two");
+});
+
+test("parseYamlLite: a block scalar as a sequence item's first key stops at the sibling key", () => {
+  const parsed = parseYamlLite(`
+allow:
+  - reason: >-
+      body line
+    entry: a.kt
+`);
+  assert.equal(parsed.allow[0].reason, "body line");
+  assert.equal(parsed.allow[0].entry, "a.kt");
+});
+
+test("parseYamlLite: a plain scalar beginning with '>' or '|' is not a block scalar", () => {
+  const parsed = parseYamlLite(`
+a: >20
+b: |x
+`);
+  assert.equal(parsed.a, ">20");
+  assert.equal(parsed.b, "|x");
+});
+
 test("parseYamlLite: quoted scalars keep colons, commas and hashes", () => {
   const parsed = parseYamlLite('a: "x: y, z # n"\nb: [ "p, q", r ]\n');
   assert.equal(parsed.a, "x: y, z # n");
   assert.deepEqual(parsed.b, ["p, q", "r"]);
 });
 
-test("parseYamlLite: folded and literal block scalars (sentinel allow reasons)", () => {
-  const folded = parseYamlLite(`
-allow:
-  - entry: AGENTS.md
-    reason: >-
-      keep the project's own wording
-      and the lane's own layout
-  - entry: biome.json
-    reason: "divergence by design"
-`);
-  assert.deepEqual(folded.allow, [
-    { entry: "AGENTS.md", reason: "keep the project's own wording and the lane's own layout" },
-    { entry: "biome.json", reason: "divergence by design" },
-  ]);
-
-  const clipped = parseYamlLite("reason: >\n  one line\n");
-  assert.equal(clipped.reason, "one line\n");
-
-  const literal = parseYamlLite("reason: |-\n  first\n  second\n");
-  assert.equal(literal.reason, "first\nsecond");
-
-  const literalClip = parseYamlLite("reason: |\n  first\n  second\n");
-  assert.equal(literalClip.reason, "first\nsecond\n");
-
+test("parseYamlLite: a block-scalar header with no body reads as an empty string", () => {
   const emptyBody = parseYamlLite("reason: >-\nnext: 1\n");
   assert.equal(emptyBody.reason, "");
   assert.equal(emptyBody.next, "1");
