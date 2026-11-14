@@ -31,6 +31,10 @@ entries:
   application/src/main/kotlin/dev/agner/template/application/telemetry/TelemetryJsonProviders.kt: owned
   application/src/main/resources/logback-spring.xml: owned
   http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/RequestTelemetry.kt: owned
+  # The error body is lane-specific (portfolio-2 carries `pendingTransfers`); a scaffold change
+  # to the handler or its spec is a porting judgment, never an overwrite.
+  http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/DomainExceptionHandling.kt: judgment
+  http-api/src/test/kotlin/dev/agner/template/httpapi/configuration/DomainExceptionHandlingTest.kt: judgment
   usecase/src/test/kotlin/dev/agner/template/usecase/commons/RequestContextTest.kt: owned
   usecase/src/test/kotlin/dev/agner/template/usecase/commons/TelemetryLoggingTest.kt: owned
   usecase/src/test/kotlin/dev/agner/template/usecase/health/HealthTelemetryTest.kt: owned

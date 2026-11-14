@@ -40,7 +40,7 @@ Module → key files → seam index, plus the app entry points; seeded from the 
 **Seam(s)**:
 - **Route seam** — `ControllerTemplate.routes()` (`typealias RouteDefinition = Routing.() -> Unit`); `KtorConfig` injects `Set<ControllerTemplate>` and mounts each, so adding an endpoint is adding a controller and no manual registration.
 - **Error-body seam** — `installDomainExceptionHandler` is the one `StatusPages` handler building the `{"error","message","detail"}` body; `DomainExceptionStatusMapper` chooses the status (defaults to `400`).
-- **Request telemetry seam** — `RequestTelemetry.install` runs before routing: it resolves/echoes `X-Request-ID`, binds the `RequestContext`, installs `KtorServerTelemetry` (the `http.server.request.duration` histogram), keeps `http.server.active_requests` honest, and emits the single WARN/ERROR boundary record per 4xx/5xx. Success is silent.
+- **Request telemetry seam** — `RequestTelemetry.install` runs before routing: it resolves/echoes `X-Request-ID`, binds the `RequestContext`, installs `KtorServerTelemetry` (the `http.server.request.duration` histogram), keeps `http.server.active_requests` honest, and emits the single WARN/ERROR boundary record per failed request. Success is silent; a framework-mapped rejection keeps its Ktor status and logs WARN, an unexpected failure logs ERROR with exception semconv.
 
 ### `application` — composition root
 **Purpose**: the Spring Boot entry and the runtime configuration that wires the modules together.

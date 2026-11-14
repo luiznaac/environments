@@ -152,7 +152,8 @@ Do **not** parse `traceparent` yet; `X-Request-ID` stays compatible with future 
 **Error telemetry — one record per failure, at the boundary that owns the response.** Usecases and gateways never log-and-throw; they throw (or enrich the exception) and the boundary logs once.
 
 - **Every 4xx → one WARN** `http.request.failed`, `error.type` = the stable domain code the transport already exposes (`resource_not_found`, `invalid_argument`, `domain_error`), plus `http.request.method`, `http.route` (preferred) or `url.path`, `http.response.status_code`, `request.id`. **No `exception.*`, no stacktrace** for expected domain errors.
-- **Every 5xx → one ERROR**, `error.type` = the exception class name (not the message), plus `exception.type` / `.message` / `.stacktrace` and the request attributes. A 5xx produced by an expected domain error stays stacktrace-free but is still ERROR.
+- **A framework-mapped rejection → one WARN**, never ERROR, and it keeps its framework status. A malformed body, unsupported media type, oversized payload or timeout is a handled client-side degradation — resolved by the framework's own status mapping (in the Kotlin lane, Ktor's `defaultExceptionStatusCode`: 400/404/413/415/504): the boundary answers that status, never an upgraded 500, and logs `http.request.failed` at WARN with the status-driven `error.type` and **no `exception.*`, no stacktrace**. A timeout is a degradation the framework handled, so it logs WARN even though its 504 still counts as a 5xx response in the RED metrics.
+- **Every 5xx outside that framework map → one ERROR**, `error.type` = the exception class name (not the message), plus `exception.type` / `.message` / `.stacktrace` and the request attributes. A 5xx produced by an expected domain error stays stacktrace-free but is still ERROR.
 - **Background-task failure → one ERROR** at the task boundary with `job.id` (plus an inherited `request.id`).
 - **Success (2xx/3xx) produces no per-request record.**
 
@@ -298,8 +299,8 @@ One row per contract clause. A clause without a row, or a row whose test is miss
 | bridge drops `level`/`timestamp` from attributes; uvicorn loggers re-parented | — | `test_logging_bridge.py` | fast |
 | severity maps ERROR/WARN/INFO/DEBUG; no `trace_id`/`span_id` | `TelemetryLoggingTest` | `test_logging_bridge.py` | fast |
 | secret keys → `[REDACTED]` with the key kept, in **both** renderings; no body attribute; non-secret PII passes | `RedactingMdcFilterTest` | `test_logging_bridge.py` | fast |
-| one 4xx → one WARN `http.request.failed`, no `exception.*`, full request attributes | `RequestTelemetryTest` | `test_telemetry_http.py` | fast |
-| one 5xx → one ERROR with exception semconv; a success emits no per-request record; no access log | `RequestTelemetryTest` | `test_telemetry_http.py` | fast |
+| one 4xx → one WARN `http.request.failed`, no `exception.*`, full request attributes; a framework-mapped 4xx/504 keeps its status and logs WARN | `RequestTelemetryTest` | `test_telemetry_http.py` | fast |
+| one unexpected 5xx → one ERROR with exception semconv; a success emits no per-request record; no access log | `RequestTelemetryTest` | `test_telemetry_http.py` | fast |
 | `request.id` on every request record; valid inbound kept, invalid replaced; echoed on success and error | `RequestTelemetryTest` | `test_telemetry_http.py` | fast |
 | outbound `X-Request-ID` propagation | `ClientTelemetryTest` | `test_telemetry_http.py` | fast |
 | background work carries `job.id` | port-level (chameidor `TaskService`/`TaskExecutor`; shougong task boundary) | same | Rung 2/3 evidence |

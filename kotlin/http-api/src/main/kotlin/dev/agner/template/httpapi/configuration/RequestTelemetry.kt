@@ -14,6 +14,7 @@ import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.PipelineCall
 import io.ktor.server.application.call
 import io.ktor.server.application.install
+import io.ktor.server.engine.defaultExceptionStatusCode
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
@@ -82,26 +83,39 @@ class RequestTelemetry(
     }
 
     private fun recordBoundary(call: ApplicationCall, requestContext: RequestContext, failure: Throwable?) {
-        val status = statusOf(call, failure)
+        // Ktor's own boundary mapping: a framework-rejected request (malformed body, unsupported
+        // media type, oversized payload, timeout) keeps its 4xx/504 status instead of becoming a
+        // 500, so an expected client-side degradation never logs as ERROR.
+        val frameworkStatus = failure?.let { defaultExceptionStatusCode(it) }
+        val status = statusOf(call, failure, frameworkStatus)
         if (status.value < 400) {
             return
         }
-        val errorType = errorTypeOf(failure, status)
+        val errorType = errorTypeOf(failure, status, frameworkStatus)
         val attributes = requestAttributes(call, requestContext, status, errorType)
-        val level = if (status.value >= 500) EventLevel.ERROR else EventLevel.WARN
-        val throwable = failure?.takeIf { it !is DomainException && status.value >= 500 }
+        val failed = status.value >= 500 && frameworkStatus == null
+        val level = if (failed) EventLevel.ERROR else EventLevel.WARN
+        val throwable = failure?.takeIf { it !is DomainException && failed }
         log.event(HTTP_REQUEST_FAILED, *attributes.toTypedArray(), level = level, throwable = throwable)
     }
 
-    private fun statusOf(call: ApplicationCall, failure: Throwable?): HttpStatusCode = when {
+    private fun statusOf(
+        call: ApplicationCall,
+        failure: Throwable?,
+        frameworkStatus: HttpStatusCode?,
+    ): HttpStatusCode = when {
         failure is DomainException -> statusMapper.statusFor(failure)
-        failure != null -> HttpStatusCode.InternalServerError
+        failure != null -> frameworkStatus ?: HttpStatusCode.InternalServerError
         else -> call.response.status() ?: HttpStatusCode.OK
     }
 
-    private fun errorTypeOf(failure: Throwable?, status: HttpStatusCode): String = when {
+    private fun errorTypeOf(
+        failure: Throwable?,
+        status: HttpStatusCode,
+        frameworkStatus: HttpStatusCode?,
+    ): String = when {
         failure is DomainException -> failure.error
-        failure != null -> failure::class.java.simpleName
+        failure != null && frameworkStatus == null -> failure::class.java.simpleName
         status == HttpStatusCode.NotFound -> TelemetryAttributes.RESOURCE_NOT_FOUND
         status.value == 400 || status.value == 422 -> TelemetryAttributes.INVALID_ARGUMENT
         else -> TelemetryAttributes.DOMAIN_ERROR
