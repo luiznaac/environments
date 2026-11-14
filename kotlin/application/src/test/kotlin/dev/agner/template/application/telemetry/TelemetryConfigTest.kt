@@ -100,7 +100,7 @@ class TelemetryConfigTest : StringSpec({
 
         settings.endpoint shouldBe "http://localhost:4318"
         settings.environment shouldBe "dev"
-        settings.pipelines shouldBe TelemetryPipelines(TelemetryExporter.OTLP, TelemetryExporter.OTLP)
+        settings.pipelines shouldBe TelemetryPipelines(logs = TelemetryExporter.OTLP, metrics = TelemetryExporter.OTLP)
     }
 
     "TELEMETRY_CONSOLE wins over an exporter env override" {
@@ -112,7 +112,10 @@ class TelemetryConfigTest : StringSpec({
             environment = mapOf("OTEL_LOGS_EXPORTER" to "otlp", "OTEL_METRICS_EXPORTER" to "otlp"),
         )
 
-        settings.pipelines shouldBe TelemetryPipelines(TelemetryExporter.CONSOLE, TelemetryExporter.CONSOLE)
+        settings.pipelines shouldBe TelemetryPipelines(
+            logs = TelemetryExporter.CONSOLE,
+            metrics = TelemetryExporter.CONSOLE,
+        )
     }
 
     "TELEMETRY_CONSOLE swaps both exporters instead of adding one" {
@@ -124,7 +127,10 @@ class TelemetryConfigTest : StringSpec({
             environment = emptyMap(),
         )
 
-        settings.pipelines shouldBe TelemetryPipelines(TelemetryExporter.CONSOLE, TelemetryExporter.CONSOLE)
+        settings.pipelines shouldBe TelemetryPipelines(
+            logs = TelemetryExporter.CONSOLE,
+            metrics = TelemetryExporter.CONSOLE,
+        )
     }
 
     "the test profile exports nothing" {
@@ -137,7 +143,7 @@ class TelemetryConfigTest : StringSpec({
         )
 
         settings.environment shouldBe "test"
-        settings.pipelines shouldBe TelemetryPipelines(TelemetryExporter.NONE, TelemetryExporter.NONE)
+        settings.pipelines shouldBe TelemetryPipelines(logs = TelemetryExporter.NONE, metrics = TelemetryExporter.NONE)
     }
 
     "no trace exporter is ever configured" {
@@ -199,7 +205,7 @@ class TelemetryConfigTest : StringSpec({
             environment = mapOf("OTEL_LOGS_EXPORTER" to "none", "OTEL_METRICS_EXPORTER" to "none"),
         )
 
-        settings.pipelines shouldBe TelemetryPipelines(TelemetryExporter.NONE, TelemetryExporter.NONE)
+        settings.pipelines shouldBe TelemetryPipelines(logs = TelemetryExporter.NONE, metrics = TelemetryExporter.NONE)
     }
 
     "the traces exporter must stay none" {
@@ -307,8 +313,11 @@ class TelemetryConfigTest : StringSpec({
         logExporter.export(emptyList())
         metricExporter.export(emptyList())
         events.list.size shouldBe 1
-        events.list.single().level shouldBe Level.WARN
-        events.list.single().message shouldBe "telemetry.export.failed"
+        val event = events.list.single()
+        event.level shouldBe Level.WARN
+        event.message shouldBe "telemetry.export.failed"
+        event.mdcPropertyMap["telemetry.signal"] shouldBe "logs"
+        event.mdcPropertyMap.containsKey("signal") shouldBe false
 
         result = CompletableResultCode.ofSuccess()
         logExporter.export(emptyList())
