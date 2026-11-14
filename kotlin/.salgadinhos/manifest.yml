@@ -16,6 +16,28 @@ entries:
   # The telemetry standard every lane is reviewed against; the scaffold owns the text.
   docs/observability.md: owned
   CODING_STANDARDS.md: owned
+  # The telemetry vertical slice. These paths carry the `template` token in the package path;
+  # the lane-side name substitution (issue #88) resolves them to the instantiated package.
+  usecase/src/main/kotlin/dev/agner/template/usecase/commons/MetricCatalog.kt: owned
+  usecase/src/main/kotlin/dev/agner/template/usecase/commons/TelemetryAttributes.kt: owned
+  usecase/src/main/kotlin/dev/agner/template/usecase/commons/RequestContext.kt: owned
+  usecase/src/main/kotlin/dev/agner/template/usecase/commons/TelemetryLogging.kt: owned
+  usecase/src/main/kotlin/dev/agner/template/usecase/health/HealthTelemetry.kt: owned
+  application/src/main/kotlin/dev/agner/template/application/telemetry/Telemetry.kt: owned
+  application/src/main/kotlin/dev/agner/template/application/telemetry/TelemetryConfig.kt: owned
+  application/src/main/kotlin/dev/agner/template/application/telemetry/TelemetryResource.kt: owned
+  application/src/main/kotlin/dev/agner/template/application/telemetry/TelemetryViews.kt: owned
+  application/src/main/kotlin/dev/agner/template/application/telemetry/RedactingMdcFilter.kt: owned
+  application/src/main/kotlin/dev/agner/template/application/telemetry/TelemetryJsonProviders.kt: owned
+  application/src/main/resources/logback-spring.xml: owned
+  http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/RequestTelemetry.kt: owned
+  usecase/src/test/kotlin/dev/agner/template/usecase/commons/RequestContextTest.kt: owned
+  usecase/src/test/kotlin/dev/agner/template/usecase/commons/TelemetryLoggingTest.kt: owned
+  usecase/src/test/kotlin/dev/agner/template/usecase/health/HealthTelemetryTest.kt: owned
+  application/src/test/kotlin/dev/agner/template/application/telemetry/TelemetryConfigTest.kt: owned
+  application/src/test/kotlin/dev/agner/template/application/telemetry/RedactingMdcFilterTest.kt: owned
+  http-api/src/test/kotlin/dev/agner/template/httpapi/configuration/RequestTelemetryTest.kt: owned
+  gateway/src/test/kotlin/dev/agner/template/gateway/configuration/ClientTelemetryTest.kt: owned
   # A lane's Gradle build layout carries project-specific modules and dependencies; port by judgment.
   build.gradle.kts: judgment
   settings.gradle.kts: judgment

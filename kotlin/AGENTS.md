@@ -155,8 +155,12 @@ Search for an existing spec and an existing fixture **before creating a new one*
 | `mysql.host` / `mysql.user` / `mysql.password` | `MYSQL_HOST` / `MYSQL_USER` / `MYSQL_PASSWORD` | required, no defaults |
 | `mysql.port` | `MYSQL_PORT` | defaults to `3306`; the standalone `migrate()` path (`MysqlEnv`) reads the same variable with the same fallback |
 | `mysql.database` | `MYSQL_DATABASE` | defaults to `template`; the standalone `migrate()` path (`MysqlEnv`) reads the same variable with the same fallback |
+| `telemetry.service-name` | `OTEL_SERVICE_NAME` | defaults to the lane's name token; also the custom meter scope name |
+| `telemetry.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | dev defaults to `http://localhost:4318`; **required in prod** (boot fails without it) |
+| `telemetry.console` | `TELEMETRY_CONSOLE` | dev-only console exporters; rejected in prod |
+| log level | `LOG_LEVEL` | defaults to `INFO`; `LOGBACK_LOG_LEVEL` stays a deprecated alias |
 
-Use `${VAR}` (required) or `${VAR:default}` (optional) for env var substitution.
+Use `${VAR}` (required) or `${VAR:default}` (optional) for env var substitution. The rest of the telemetry contract (`OTEL_*`, `SERVICE_VERSION`, `HOSTNAME`) is read from the environment untouched — see [`docs/observability.md`](docs/observability.md) §2.
 
 ## Ports
 

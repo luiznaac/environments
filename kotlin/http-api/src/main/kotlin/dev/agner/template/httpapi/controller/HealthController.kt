@@ -2,6 +2,7 @@ package dev.agner.template.httpapi.controller
 
 import dev.agner.template.usecase.commons.mapAsync
 import dev.agner.template.usecase.health.HealthChecker
+import dev.agner.template.usecase.health.HealthTelemetry
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.response.respond
 import io.ktor.server.routing.get
@@ -32,9 +33,14 @@ class HealthController(
 @Component
 class HealthHandler(
     private val healthCheckers: Set<HealthChecker>,
+    private val healthTelemetry: HealthTelemetry,
 ) {
 
     suspend fun healthCheck() = withContext(Dispatchers.IO) {
-        healthCheckers.mapAsync { it.getHealthStatus() }.awaitAll()
+        val results = healthCheckers.mapAsync { it.getHealthStatus() }.awaitAll()
+        for (result in results) {
+            healthTelemetry.record(result)
+        }
+        results
     }
 }

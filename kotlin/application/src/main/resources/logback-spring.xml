@@ -1,0 +1,57 @@
+<configuration>
+    <conversionRule conversionWord="resource"
+                    converterClass="dev.agner.template.application.telemetry.TelemetryJsonProviders$ResourceConverter"/>
+
+    <turboFilter class="dev.agner.template.application.telemetry.RedactingMdcFilter"/>
+
+    <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+        <captureExperimentalAttributes>false</captureExperimentalAttributes>
+        <captureCodeAttributes>false</captureCodeAttributes>
+        <captureMarkerAttribute>false</captureMarkerAttribute>
+        <mdcAttributesIncluded>*</mdcAttributesIncluded>
+    </appender>
+
+    <springProfile name="prod">
+        <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+                <providers>
+                    <provider class="dev.agner.template.application.telemetry.TelemetryJsonProviders$TimestampJsonProvider"/>
+                    <provider class="dev.agner.template.application.telemetry.TelemetryJsonProviders$ObservedTimestampJsonProvider"/>
+                    <provider class="dev.agner.template.application.telemetry.TelemetryJsonProviders$SeverityTextJsonProvider"/>
+                    <provider class="dev.agner.template.application.telemetry.TelemetryJsonProviders$SeverityNumberJsonProvider"/>
+                    <provider class="dev.agner.template.application.telemetry.TelemetryJsonProviders$BodyJsonProvider"/>
+                    <provider class="dev.agner.template.application.telemetry.TelemetryJsonProviders$EventNameJsonProvider"/>
+                    <provider class="dev.agner.template.application.telemetry.TelemetryJsonProviders$ResourceJsonProvider"/>
+                    <provider class="net.logstash.logback.composite.loggingevent.MdcJsonProvider">
+                        <excludeMdcKeyName>event.name</excludeMdcKeyName>
+                    </provider>
+                    <provider class="net.logstash.logback.composite.loggingevent.ThrowableClassNameJsonProvider">
+                        <fieldName>exception.type</fieldName>
+                    </provider>
+                    <provider class="net.logstash.logback.composite.loggingevent.ThrowableMessageJsonProvider">
+                        <fieldName>exception.message</fieldName>
+                    </provider>
+                    <provider class="net.logstash.logback.composite.loggingevent.StackTraceJsonProvider">
+                        <fieldName>exception.stacktrace</fieldName>
+                    </provider>
+                </providers>
+            </encoder>
+        </appender>
+    </springProfile>
+
+    <springProfile name="!prod">
+        <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>
+                    %d{yyyy-MM-dd HH:mm:ss.SSS} [%cyan(%thread)] %highlight(%-5level) %cyan(%logger{36}) %magenta(%resource) %magenta({%mdc{}})
+                    - %msg%n
+                </pattern>
+            </encoder>
+        </appender>
+    </springProfile>
+
+    <root level="${LOG_LEVEL:-${LOGBACK_LOG_LEVEL:-INFO}}">
+        <appender-ref ref="STDOUT"/>
+        <appender-ref ref="OTEL"/>
+    </root>
+</configuration>

@@ -22,6 +22,7 @@ class KtorConfig(
     private val routes: Set<ControllerTemplate>,
     private val mapper: ObjectMapper,
     private val domainExceptionStatusMapper: DomainExceptionStatusMapper,
+    private val requestTelemetry: RequestTelemetry,
     @Value("\${ktor.wait}") wait: Boolean,
     @Value("\${ktor.port}") port: Int,
 ) {
@@ -32,6 +33,8 @@ class KtorConfig(
         val log = logger()
 
         server = embeddedServer(Netty, port = port) {
+            requestTelemetry.install(this)
+
             routes.onEach {
                 log.info("Initializing route: ${it::class.java.simpleName}")
                 routing(it.routes())
