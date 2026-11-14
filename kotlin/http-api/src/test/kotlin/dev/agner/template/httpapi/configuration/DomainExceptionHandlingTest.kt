@@ -11,6 +11,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.jackson.JacksonConverter
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
@@ -70,13 +71,24 @@ class DomainExceptionHandlingTest : DescribeSpec({
             }
         }
 
+        it("answers a framework-rejected request with Ktor's mapped status") {
+            testApplication {
+                application { installThrowingRoute(BadRequestException("malformed")) }
+
+                client.get("/boom").status shouldBe HttpStatusCode.BadRequest
+            }
+        }
+
         it("does not map an unexpected internal failure to the client-error contract") {
             testApplication {
                 application { installThrowingRoute(IllegalStateException("unexpected")) }
 
                 // StatusPages only maps DomainException, so an internal failure must stay a 500
-                // instead of becoming a 400 with the domain-shaped body.
-                client.get("/boom").status shouldBe HttpStatusCode.InternalServerError
+                // with a bare body instead of becoming a 400 with the domain-shaped body.
+                val response = client.get("/boom")
+
+                response.status shouldBe HttpStatusCode.InternalServerError
+                response.bodyAsText() shouldBe ""
             }
         }
     }

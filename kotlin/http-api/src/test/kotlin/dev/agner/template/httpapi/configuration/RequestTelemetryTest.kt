@@ -5,6 +5,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.LoggerContext
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.fasterxml.jackson.databind.ObjectMapper
 import dev.agner.template.usecase.commons.DomainException
 import dev.agner.template.usecase.commons.MetricCatalog
 import dev.agner.template.usecase.commons.RequestContext
@@ -18,10 +19,12 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldMatch
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
-import io.ktor.server.application.Application
+import io.ktor.serialization.jackson.JacksonConverter
 import io.ktor.server.application.install
-import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.plugins.BadRequestException
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Routing
 import io.ktor.server.routing.get
@@ -34,6 +37,7 @@ import io.opentelemetry.sdk.metrics.SdkMeterProvider
 import io.opentelemetry.sdk.metrics.data.MetricData
 import io.opentelemetry.sdk.testing.exporter.InMemoryMetricReader
 import org.slf4j.LoggerFactory
+import java.util.concurrent.TimeoutException
 
 private class NotFoundDomainException : DomainException(
     error = TelemetryAttributes.RESOURCE_NOT_FOUND,
@@ -143,6 +147,46 @@ class RequestTelemetryTest : DescribeSpec({
             }
         }
 
+        it("keeps a framework-rejected request a WARN 4xx through the real handler") {
+            val harness = harness()
+
+            testApplication {
+                app(harness) {
+                    get("/malformed") { throw BadRequestException("malformed body") }
+                }
+
+                val response = client.get("/malformed")
+
+                response.status shouldBe HttpStatusCode.BadRequest
+                val event = events.list.single()
+                event.level shouldBe Level.WARN
+                event.message shouldBe "http.request.failed"
+                event.throwableProxy.shouldBeNull()
+                event.mdcPropertyMap[TelemetryAttributes.ERROR_TYPE] shouldBe TelemetryAttributes.INVALID_ARGUMENT
+                event.mdcPropertyMap[TelemetryAttributes.HTTP_RESPONSE_STATUS_CODE] shouldBe "400"
+            }
+        }
+
+        it("keeps a framework timeout a WARN 504 through the real handler") {
+            val harness = harness()
+
+            testApplication {
+                app(harness) {
+                    get("/slow") { throw TimeoutException("slow") }
+                }
+
+                val response = client.get("/slow")
+
+                response.status shouldBe HttpStatusCode.GatewayTimeout
+                val event = events.list.single()
+                event.level shouldBe Level.WARN
+                event.message shouldBe "http.request.failed"
+                event.throwableProxy.shouldBeNull()
+                event.mdcPropertyMap[TelemetryAttributes.ERROR_TYPE] shouldBe TelemetryAttributes.DOMAIN_ERROR
+                event.mdcPropertyMap[TelemetryAttributes.HTTP_RESPONSE_STATUS_CODE] shouldBe "504"
+            }
+        }
+
         it("leaves http.route absent on an unmatched 404") {
             val harness = harness()
 
@@ -236,19 +280,13 @@ private fun ApplicationTestBuilder.app(harness: Harness, routes: Routing.() -> U
         statusMapper = NotFoundStatusMapper(),
     )
     application {
-        installTelemetry(telemetry, routes)
-    }
-}
-
-private fun Application.installTelemetry(telemetry: RequestTelemetry, routes: Routing.() -> Unit) {
-    telemetry.install(this)
-    install(StatusPages) {
-        exception<DomainException> { call, cause ->
-            call.respond(NotFoundStatusMapper().statusFor(cause))
+        install(ContentNegotiation) {
+            register(ContentType.Application.Json, JacksonConverter(ObjectMapper()))
         }
-        exception<Throwable> { call, _ -> call.respond(HttpStatusCode.InternalServerError) }
+        telemetry.install(this)
+        installDomainExceptionHandler(NotFoundStatusMapper())
+        routing(routes)
     }
-    routing(routes)
 }
 
 private fun Collection<MetricData>.allAttributeKeys(): List<String> = flatMap { metric ->
