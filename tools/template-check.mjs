@@ -55,8 +55,8 @@ export const VALUE_PLACEHOLDER = "{{value}}";
 // ---------------------------------------------------------------------------
 // YAML-lite: exactly the subset the manifests and sentinels use — nested maps
 // by indentation, block sequences, inline flow sequences, quoted or plain
-// scalars, comments, `{}` and `null`. No anchors, multi-line scalars, flow
-// maps or explicit tags; keep the files within that subset.
+// scalars, block scalars (`>`/`|` with optional chomping), comments, `{}` and
+// `null`. No anchors, flow maps or explicit tags; keep the files within that subset.
 // ---------------------------------------------------------------------------
 
 function stripComment(line) {
@@ -145,6 +145,24 @@ function splitKeyValue(text, line) {
   return { key: unquote(text.slice(0, colon).trim()), rest: text.slice(colon + 1).trim() };
 }
 
+// A block scalar covers the multi-line `reason` a lane writes in a sentinel's `allow` list:
+// `>` folds the lines with spaces, `|` keeps the breaks, and `-`/`+` chomp the trailing
+// newline. Bodies come from the pre-pass, so blank lines are not preserved (`+` behaves like
+// clip) and a ` #` inside a body is truncated as a comment — keep reason text within that
+// subset. An explicit indentation indicator (`|2`) is not in the subset.
+function parseBlockScalar(indicator, lines, state, parentIndent) {
+  const folded = indicator.startsWith(">");
+  const strip = indicator.includes("-");
+  const parts = [];
+  while (state.pos < lines.length && lines[state.pos].indent > parentIndent) {
+    parts.push(lines[state.pos].text);
+    state.pos++;
+  }
+  const body = parts.join(folded ? " " : "\n");
+  if (strip || body === "") return body;
+  return `${body}\n`;
+}
+
 function resolveValue(rest, lines, state, parentIndent, line) {
   if (rest === "") {
     const next = lines[state.pos];
@@ -153,6 +171,7 @@ function resolveValue(rest, lines, state, parentIndent, line) {
   }
   if (rest === "{}") return {};
   if (rest === "[]") return [];
+  if (/^[|>][+-]?$/.test(rest)) return parseBlockScalar(rest, lines, state, parentIndent);
   if (rest.startsWith("[")) return parseFlowSequence(rest, line);
   return parseScalar(rest);
 }
@@ -193,7 +212,7 @@ function parseSequence(lines, state, indent) {
     if (findKeyColon(content) !== -1) {
       const item = {};
       const { key, rest } = splitKeyValue(content, line);
-      item[key] = resolveValue(rest, lines, state, indent, line);
+      item[key] = resolveValue(rest, lines, state, indent + 2, line);
       const next = lines[state.pos];
       if (next && next.indent > indent) Object.assign(item, parseMapping(lines, state, next.indent));
       items.push(item);
