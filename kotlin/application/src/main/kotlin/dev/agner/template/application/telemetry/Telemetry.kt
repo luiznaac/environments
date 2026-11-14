@@ -61,16 +61,13 @@ data class TelemetrySettings(
 ) {
 
     val pipelines: TelemetryPipelines
-        get() {
-            if (environment == TEST_ENVIRONMENT) {
-                return TelemetryPipelines(TelemetryExporter.NONE, TelemetryExporter.NONE)
-            }
-            if (console) {
-                return TelemetryPipelines(TelemetryExporter.CONSOLE, TelemetryExporter.CONSOLE)
-            }
-            return TelemetryPipelines(
-                logExporter ?: TelemetryExporter.OTLP,
-                metricExporter ?: TelemetryExporter.OTLP,
+        get() = when {
+            environment == TEST_ENVIRONMENT ->
+                TelemetryPipelines(logs = TelemetryExporter.NONE, metrics = TelemetryExporter.NONE)
+            console -> TelemetryPipelines(logs = TelemetryExporter.CONSOLE, metrics = TelemetryExporter.CONSOLE)
+            else -> TelemetryPipelines(
+                logs = logExporter ?: TelemetryExporter.OTLP,
+                metrics = metricExporter ?: TelemetryExporter.OTLP,
             )
         }
 
@@ -166,9 +163,12 @@ data class TelemetrySettings(
             .getOrDefault("unknown")
 
         fun buildVersion(): String = runCatching {
-            val stream = TelemetrySettings::class.java.getResourceAsStream("/build-info.properties")
-                ?: return@runCatching null
-            stream.use { Properties().apply { load(it) }.getProperty("version") }
+            TelemetrySettings::class.java.getResourceAsStream("/build-info.properties")
+                ?.use { stream ->
+                    val properties = Properties()
+                    properties.load(stream)
+                    properties.getProperty("version")
+                }
         }.getOrNull() ?: "dev"
     }
 }
@@ -303,7 +303,7 @@ class EventNameStampingProcessor : LogRecordProcessor {
     override fun close() = Unit
 }
 
-private const val SIGNAL_ATTRIBUTE = "signal"
+private const val SIGNAL_ATTRIBUTE = "telemetry.signal"
 private const val COLLECTOR_UNREACHABLE = "collector_unreachable"
 private const val TELEMETRY_EXPORT_FAILED = "telemetry.export.failed"
 
