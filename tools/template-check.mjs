@@ -12,8 +12,9 @@
 // Sources of truth (nothing is hardcoded here):
 //   - `environments/<stack>/.salgadinhos/manifest.yml` — `entries` (path -> class) and
 //     `instantiate` (the scaffold's own name token).
-//   - `<project>/.salgadinhos/<lane>.yml` — sentinel: `source`, `lane`, `applied` (the pin,
-//     `scaffold_sha`), `allow`. Projects are discovered by globbing for these.
+//   - `<project>/.salgadinhos/<lane>.yml` — sentinel: `source`, `lane`, optional `name`
+//     (the instantiated project name when it differs from the checkout directory),
+//     `applied` (the pin, `scaffold_sha`), `allow`. Projects are discovered by globbing for these.
 //   - The environments checkout's git history — the pin side of the queue and lane views.
 //
 // What it compares, derived from each entry's class:
@@ -518,6 +519,9 @@ export function loadSentinel(sentinelPath) {
     throw new ConfigError(`sentinel ${sentinelPath}: missing 'source' (the scaffold this lane derives from)`);
   }
   const lane = typeof parsed?.lane === "string" && parsed.lane !== "" ? parsed.lane : basename(sentinelPath).replace(/\.ya?ml$/, "");
+  // The instantiated project name when it differs from the checkout directory (`portfolio-2`
+  // carries the `portfolio` package); absent means the directory name.
+  const name = typeof parsed?.name === "string" && parsed.name !== "" ? parsed.name : null;
   const allow = [];
   if (parsed?.allow != null) {
     if (!Array.isArray(parsed.allow)) throw new ConfigError(`sentinel ${sentinelPath}: 'allow' must be a list`);
@@ -551,7 +555,7 @@ export function loadSentinel(sentinelPath) {
       applied.scaffoldSha = rawApplied.scaffold_sha;
     }
   }
-  return { source, lane, allow, applied };
+  return { source, lane, name, allow, applied };
 }
 
 // ---------------------------------------------------------------------------
@@ -572,7 +576,7 @@ export function discoverProjects(environmentsPath, codeRoot) {
     for (const file of sentinels) {
       const sentinelPath = join(sentinelDir, file);
       const sentinel = loadSentinel(sentinelPath);
-      projects.push({ project: dirent.name, lane: sentinel.lane, source: sentinel.source, allow: sentinel.allow, applied: sentinel.applied, sentinelPath });
+      projects.push({ project: dirent.name, projectName: sentinel.name ?? dirent.name, lane: sentinel.lane, source: sentinel.source, allow: sentinel.allow, applied: sentinel.applied, sentinelPath });
     }
   }
   projects.sort((a, b) => a.project.localeCompare(b.project) || a.lane.localeCompare(b.lane));
@@ -704,7 +708,7 @@ function compareEntryViews(ctx, entry, { pin, head, project, pinMode, headMode, 
   // `instantiate.keep` names files where the scaffold's token is legitimately part of the file
   // (e.g. the Gradle wrapper's template comment), so they are compared and applied verbatim,
   // without placeholder substitution. A `watch: mode` entry never reaches the content path.
-  const substitute = (text) => (text != null && ctx.placeholder && !ctx.kept ? applyPlaceholders(text, ctx.placeholder, ctx.project) : text);
+  const substitute = (text) => (text != null && ctx.placeholder && !ctx.kept ? applyPlaceholders(text, ctx.placeholder, ctx.projectName) : text);
   const side = (text, mode) => ({ text, mode });
   const queue = [];
   const lane = [];
@@ -902,10 +906,11 @@ export function runChecks({ environmentsPath, codeRoot, globalAgentsMd, onlyProj
     }
     scaffoldAt.validate(pin);
     for (const entry of Object.values(manifest.entries)) {
-      const laneFile = laneSidePath(entry.file, manifest.instantiate.name, lane.project);
+      const laneFile = laneSidePath(entry.file, manifest.instantiate.name, lane.projectName);
       runEntry(
         {
           project: lane.project,
+          projectName: lane.projectName,
           dir: lane.lane,
           file: entry.file,
           laneFile,

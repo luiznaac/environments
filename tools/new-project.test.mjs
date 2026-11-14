@@ -599,6 +599,7 @@ test("cli: stamps the lane sentinel with source, lane, revision 1 and the scaffo
   assert.deepEqual(parsed, {
     source: "mini",
     lane: "backend",
+    name: "widget",
     applied: { revision: "1", scaffold_sha: fix.sha },
     allow: [],
   });
