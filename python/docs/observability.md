@@ -238,7 +238,7 @@ OTLP/HTTP, **cumulative** temporality, 60 s periodic reader, explicit-bucket his
 
 ## 6. Where the code lives
 
-**Purity rule.** The OTel **API** (`opentelemetry-api`, `Meter`) is allowed in `usecase`, mirroring structlog. The **SDK, exporters and framework instrumentation** are forbidden there — the `import-linter` contract adds `opentelemetry.sdk` and `opentelemetry.exporter` to `usecase`'s `forbidden_modules`, alongside `fastapi`, `sqlalchemy`, `httpx`, `pydantic` and `uvicorn`.
+**Purity rule.** The OTel **API** (`opentelemetry-api`, `Meter`) is allowed in `usecase`, mirroring structlog. The **SDK, exporters and framework instrumentation** are forbidden there — `import-linter` keeps `fastapi`, `sqlalchemy`, `httpx`, `pydantic` and `uvicorn` out, and the Rung-0 static test (`tests/unit/test_architecture.py`) rejects the `opentelemetry.sdk` / `.exporter` / `.instrumentation` subpackages, which the layer contract cannot name directly.
 
 | Piece | Package | File |
 |---|---|---|
@@ -273,7 +273,7 @@ Four rungs, proportional. **A green rung is not acceptance on its own.**
 
 | Rung | What | When |
 |---|---|---|
-| 0 — static | the `import-linter` contract keeps SDK/exporters/instrumentation out of `usecase`; Ruff and mypy run as today | every PR |
+| 0 — static | the `import-linter` contract plus the static `test_architecture.py` keep SDK/exporters/instrumentation out of `usecase`; Ruff and mypy run as today | every PR |
 | 1 — contract tests | this lane's own suite pins the contract with in-memory readers/exporters (never the composition root) | every PR, in the existing fast gate |
 | 2 — pipeline proof | a debug Collector receives both signals; the transcript lands under `## Telemetry evidence` | once per scaffold change and once per ported repo, manual |
 | 3 — production acceptance | the same assertions against the host's real Collector | once per service after its first deploy with the new image |

@@ -38,7 +38,15 @@ import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { ConfigError, VALUE_PLACEHOLDER, applyPlaceholders, loadManifest, modePermissions, resolveRoots } from "./template-check.mjs";
+import {
+  ConfigError,
+  VALUE_PLACEHOLDER,
+  applyPlaceholders,
+  laneSidePath,
+  loadManifest,
+  modePermissions,
+  resolveRoots,
+} from "./template-check.mjs";
 
 // Creation failures that are not config errors: a red fast check, a leftover, a failed commit.
 export class CreationError extends Error {}
@@ -204,7 +212,7 @@ const yamlScalar = (value) =>
 // The project's copy of the manifest is the classification only: `entries` is what the propagation
 // flow watches; the creation-only `instantiate:` section does not belong in a project, and the
 // lineage lives in the lane sentinel.
-export function rewriteProjectManifest({ entries }) {
+export function rewriteProjectManifest({ entries, token = null, name = null }) {
   const lines = [
     "# Propagation manifest copied at creation from the scaffold's manifest: `entries` maps each",
     "# watched path to owned | pinned | merge | judgment. The lane's lineage (source, applied,",
@@ -215,11 +223,12 @@ export function rewriteProjectManifest({ entries }) {
     const fields = { ...entry };
     delete fields.file;
     const keys = Object.keys(fields);
+    const lanePath = token && name ? laneSidePath(entry.file, token, name) : entry.file;
     if (keys.length === 1 && keys[0] === "class") {
-      lines.push(`  ${yamlScalar(entry.file)}: ${yamlScalar(fields.class)}`);
+      lines.push(`  ${yamlScalar(lanePath)}: ${yamlScalar(fields.class)}`);
       continue;
     }
-    lines.push(`  ${yamlScalar(entry.file)}:`);
+    lines.push(`  ${yamlScalar(lanePath)}:`);
     for (const [key, value] of Object.entries(fields)) {
       if (Array.isArray(value)) {
         lines.push(`    ${key}:`);
@@ -711,7 +720,11 @@ export function createProject({
   const appliedValues = applyValueOverrides(laneAbs, { token, values, overrides: { ...portOverrides, ...overrides } });
   renameTokenPaths(laneAbs, token, name);
   rewriteTokenContents(laneAbs, { token, name, keep });
-  writeFileSync(join(laneAbs, ".salgadinhos", "manifest.yml"), rewriteProjectManifest(manifest), "utf8");
+  writeFileSync(
+    join(laneAbs, ".salgadinhos", "manifest.yml"),
+    rewriteProjectManifest({ entries: manifest.entries, token, name }),
+    "utf8",
+  );
 
   const sentinelPath = join(projectRoot, ".salgadinhos", `${sentinelFileName(laneDir)}.yml`);
   mkdirSync(dirname(sentinelPath), { recursive: true });

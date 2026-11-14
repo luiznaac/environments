@@ -8,10 +8,13 @@ The layers are one package, `src/template/`, with one sub-package each; `import-
 
 ### `usecase/` — domain models, ports and services
 **Purpose**: the pure core. Owns the health-check ports (`IHealthChecker`, `IHealthGateway`), the `HealthCheckResult` model, the transaction port and the cross-cutting helpers. Imports no framework — `import-linter` forbids `fastapi`, `sqlalchemy`, `httpx`, `uvicorn` and `pydantic` here.
-**Files**: `src/template/usecase/health/{checker,gateway}.py`; `src/template/usecase/configuration/transaction.py`; `src/template/usecase/commons/{time,logging,asyncx,exceptions}.py`
+**Files**: `src/template/usecase/health/{checker,gateway,telemetry}.py`; `src/template/usecase/configuration/transaction.py`; `src/template/usecase/commons/{time,logging,request_context,asyncx,exceptions}.py`
 **Seam(s)**:
 - **`IHealthChecker`** (`health/checker.py`) — the inbound port (`async get_health_status() -> HealthCheckResult`); `HealthController` takes a `Sequence[IHealthChecker]` and every adapter satisfies it structurally.
 - **`IHealthGateway`** (`health/gateway.py`) — the outbound port (`async is_healthy() -> bool`), implemented by `gateway`'s `AppHealthGateway` and consumed by `HttpClientHealthCheck`.
+- **`HealthTelemetry`** (`health/telemetry.py`) — records the last result per component into `health.check.status`, increments `health.check.failures`, and logs only WARN/INFO transitions; `HealthController` calls `record(...)`.
+- **`request_context`** (`commons/request_context.py`) — the `ContextVar` carrier for `request.id` / `job.id`; the edge binds it and the outbound client propagates it.
+- **Log bridge** (`commons/logging.py`) — structlog stays the API, stdlib is the chokepoint; the terminal processor splits event/attributes, and the redaction filter stamps `event.name` on plain framework logs.
 - **`ITransactionTemplate`** (`configuration/transaction.py`) — lets a service compose several repository writes atomically without importing SQLAlchemy; implemented in `persistence`.
 - **`IClock`** (`commons/time.py`) — the time seam; logic reads time from the injected clock, never `datetime.now()`, so tests can fix it.
 - Domain models are frozen, slotted dataclasses (see `CODING_STANDARDS.md`); Pydantic belongs only to `httpapi/schema.py` and `application/settings.py`.
@@ -28,29 +31,31 @@ The layers are one package, `src/template/`, with one sub-package each; `import-
 **Purpose**: adapters for external systems, over one shared `httpx.AsyncClient`.
 **Files**: `src/template/gateway/configuration/http_client.py`; `src/template/gateway/health/{app_health_gateway,http_client_health_check}.py`
 **Seam(s)**:
-- **Client seam** — `configuration/http_client.py`'s `build_http_client()` produces the single `AsyncClient` the composition root injects everywhere and closes on shutdown.
-- **Gateway seam** — `AppHealthGateway` implements `IHealthGateway` by calling the service's own `/health/internal`; `HttpClientHealthCheck` implements `IHealthChecker` on top of that port. A new integration adds the port in `usecase` and its adapter here.
+- **Client seam** — `configuration/http_client.py`'s `build_http_client()` produces the single `AsyncClient` the composition root injects everywhere, closes on shutdown, and adds an outbound `X-Request-ID` request hook.
+- **Gateway seam** — `AppHealthGateway` implements `IHealthGateway` by calling the service's own `/health/internal`; `HttpClientHealthCheck` implements `IHealthChecker` on top of that port. A new integration adds the port in `usecase` and its adapter here. `HTTPXClientInstrumentor` supplies `http.client.request.duration` on this shared client.
 
 ### `httpapi/` — FastAPI edge
 **Purpose**: the HTTP surface — controllers, the edge DTOs and the domain-exception handlers.
-**Files**: `src/template/httpapi/configuration/server.py`; `src/template/httpapi/controller/{base,health_controller}.py`; `src/template/httpapi/schema.py`
+**Files**: `src/template/httpapi/configuration/{server,telemetry}.py`; `src/template/httpapi/controller/{base,health_controller}.py`; `src/template/httpapi/schema.py`
 **Seam(s)**:
 - **Route seam** — `IController.router()` returns an `APIRouter`; `server.build_app` mounts every controller the composition root passes in, so adding an endpoint never edits the server wiring.
+- **Request seam** — `server.RequestContextMiddleware` is added last (outermost): it validates/generates `X-Request-ID`, binds the `ContextVar`, echoes the response header, and owns the single 4xx WARN / 5xx ERROR boundary record. `configuration/telemetry.py` installs the FastAPI/ASGI instrumentation.
 - **DTO seam** — Pydantic models in `schema.py` are the edge shape; in a generated project that also ships a frontend, a DTO change updates its `frontend/src/api/types.ts` in the same commit.
-- **Error seam** — `server._install_exception_handlers` maps domain exceptions to the `{"code","detail"}` body; a new domain exception is one handler branch there.
+- **Error seam** — `server._install_exception_handlers` maps domain exceptions to the `{"code","detail"}` body and stamps `request.state.error_type`; a new domain exception is one handler branch there.
 
 ### `application/` — composition root
-**Purpose**: the one place that knows every concrete class — builds the object graph, the FastAPI app and the settings.
-**Files**: `src/template/application/{settings,container,boot}.py`
+**Purpose**: the one place that knows every concrete class — builds the object graph, telemetry, the FastAPI app and the settings.
+**Files**: `src/template/application/{settings,telemetry,container,boot}.py`
 **Seam(s)**:
-- **Composition seam** — `Container.__init__` builds the engine, HTTP client, checkers and controllers; adding a checker or endpoint is writing the class and adding one line there.
-- **Config seam** — `Settings` (pydantic-settings) reads `APP_ENV`, `HTTP_PORT`, `MYSQL__*` and `GATEWAYS__APP__HOST`; nested env vars use `__` as the delimiter. `Settings.app_host` derives the self-health base URL from `HTTP_PORT` unless `GATEWAYS__APP__HOST` is set explicitly.
-- **Entry seam** — `boot.py` exposes `app` (the uvicorn import target) and `main()`, which serves on `HTTP_PORT` with reload only in `dev`; tests build their own `Container` with fakes and a `FixedClock`.
+- **Telemetry seam** — `telemetry.build_telemetry(settings)` builds the resource, providers, views and exporters (or in-memory ones for `APP_ENV=test`), then `Telemetry.instrument_*` installs runtime/engine/client/app instrumentation and the pool series. `Telemetry.shutdown()` flushes on `Container.aclose()`.
+- **Composition seam** — `Container.__init__` builds telemetry first, injects `HealthTelemetry`/`Meter`, then the engine, HTTP client, checkers and controllers; adding a checker or endpoint is writing the class and adding one line there.
+- **Config seam** — `Settings` (pydantic-settings) reads `APP_ENV`, `HTTP_PORT`, `MYSQL__*`, `GATEWAYS__APP__HOST` and the three `telemetry.*` keys from the standard `OTEL_*` / `TELEMETRY_CONSOLE` names; nested env vars use `__` as the delimiter. `Settings.app_host` derives the self-health base URL from `HTTP_PORT` unless `GATEWAYS__APP__HOST` is set explicitly.
+- **Entry seam** — `boot.py` exposes `app` (the uvicorn import target) and `main()`, which serves on `HTTP_PORT` with reload only in `dev` and `--no-access-log`; tests build their own `Container` with fakes and a `FixedClock`.
 
 ### `tests/` — the two test lanes
 **Purpose**: unit specs (no Docker) and integration specs that boot the real app against a real MySQL.
-**Files**: `tests/conftest.py`; `tests/unit/{test_app_health_gateway,test_app_host,test_boot}.py`; `tests/integration/conftest.py`; `tests/integration/test_health.py`
-**Seam(s)**: `tests/integration/conftest.py` starts MySQL through Testcontainers and drives the real app in-process over ASGI; unit specs construct fakes directly. The self-health base-URL derivation is pinned in `tests/unit/test_app_host.py`, and the module entrypoint's configured port and dev-only reload in `tests/unit/test_boot.py`. Put a shared builder next to `tests/conftest.py` rather than copying fixtures per spec. `uv run poe check` is the Docker-free fast gate; the integration lane runs in CI.
+**Files**: `tests/conftest.py`; `tests/unit/{test_app_health_gateway,test_app_host,test_boot,test_telemetry,test_logging_bridge,test_health_telemetry,test_telemetry_http}.py`; `tests/integration/conftest.py`; `tests/integration/{test_health,test_telemetry_db}.py`
+**Seam(s)**: `tests/integration/conftest.py` starts MySQL through Testcontainers and drives the real app in-process over ASGI; unit specs construct fakes directly. The self-health base-URL derivation is pinned in `tests/unit/test_app_host.py`, and the module entrypoint's configured port and dev-only reload in `tests/unit/test_boot.py`. The telemetry contract is split by clause: `test_telemetry.py` (resource/config/runtime/pool), `test_logging_bridge.py` (record shape/correlation/redaction), `test_health_telemetry.py` (gauge/counter/transitions), and `test_telemetry_http.py` (ASGI boundary/catalog/buckets with a stub checker). `tests/integration/test_telemetry_db.py` is DB-backed extra evidence. Put a shared builder next to `tests/conftest.py` rather than copying fixtures per spec. `uv run poe check` is the Docker-free fast gate; the integration lane runs against a real MySQL.
 
 ### Repo root — packaging, deploy, CI
 **Purpose**: the toolchain, configuration and container story around the package.

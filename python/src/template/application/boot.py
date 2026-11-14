@@ -10,13 +10,16 @@ from fastapi import FastAPI
 
 from template.application.container import Container
 from template.application.settings import Settings
+from template.application.telemetry import build_telemetry
 from template.usecase.commons.logging import configure_logging
 
 
 def build_app() -> FastAPI:
     settings = Settings()
-    configure_logging(settings.log_level, json=settings.log_as_json)
-    container = Container(settings)
+    telemetry = build_telemetry(settings)
+    configure_logging(settings.log_level, json=settings.log_as_json, resource=telemetry.resource.attributes)
+    telemetry.install_log_bridge()
+    container = Container(settings, telemetry=telemetry)
     container.app.state.container = container
     return container.app
 
@@ -33,6 +36,7 @@ def main() -> None:
         host="0.0.0.0",  # containerised service
         port=settings.http_port,
         reload=settings.is_dev,
+        access_log=False,
     )
 
 

@@ -18,8 +18,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM python:3.12-slim-bookworm
 WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    OTEL_SEMCONV_STABILITY_OPT_IN=http,database
 COPY --from=build /app /app
 
 EXPOSE 8080
-CMD ["uvicorn", "template.application.boot:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "template.application.boot:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]

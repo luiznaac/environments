@@ -16,6 +16,29 @@ entries:
   # The telemetry standard every lane is reviewed against; the scaffold owns the text.
   docs/observability.md: owned
   CODING_STANDARDS.md: owned
+  # Telemetry source: scaffold-owned; the `template` path token maps to the lane package.
+  src/template/application/telemetry.py: owned
+  src/template/usecase/commons/request_context.py: owned
+  src/template/usecase/commons/logging.py: owned
+  src/template/usecase/health/telemetry.py: owned
+  src/template/httpapi/configuration/telemetry.py: owned
+  # Existing integration points: a lane adapts them to its own graph and frameworks.
+  src/template/application/settings.py: judgment
+  src/template/application/container.py: judgment
+  src/template/application/boot.py: judgment
+  src/template/httpapi/configuration/server.py: judgment
+  src/template/httpapi/controller/health_controller.py: judgment
+  src/template/gateway/configuration/http_client.py: judgment
+  # The contract suite is a porting judgment: a lane adapts the assertions to its graph.
+  tests/unit/test_telemetry.py: judgment
+  tests/unit/test_logging_bridge.py: judgment
+  tests/unit/test_health_telemetry.py: judgment
+  tests/unit/test_telemetry_http.py: judgment
+  tests/unit/test_architecture.py: judgment
+  tests/fixtures.py: judgment
+  tests/integration/test_telemetry_db.py: judgment
+  # A lane's image and deploy bits are its own (access-log flag, stopwaitsecs, ports).
+  Dockerfile: judgment
   pyproject.toml:
     class: merge
     sections:
