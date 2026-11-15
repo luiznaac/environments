@@ -230,6 +230,38 @@ allow:
   );
 });
 
+test("updateSentinelText: stamps seen_in beside a folded reason, not inside it", () => {
+  const folded = `source: kotlin
+lane: backend
+applied:
+  revision: 2
+  scaffold_sha: oldsha
+allow:
+  - entry: http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/RequestTelemetry.kt
+    reason: >-
+      chameidor has no domain-error type and
+      drives the 4xx WARN from the response status instead
+`;
+  const updated = updateSentinelText(folded, { revision: 3, scaffoldSha: "newsha", observedAllows: ["http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/RequestTelemetry.kt"] });
+  assert.equal(
+    updated,
+    `source: kotlin
+lane: backend
+applied:
+  revision: 3
+  scaffold_sha: newsha
+allow:
+  - entry: http-api/src/main/kotlin/dev/agner/template/httpapi/configuration/RequestTelemetry.kt
+    reason: >-
+      chameidor has no domain-error type and
+      drives the 4xx WARN from the response status instead
+    seen_in: newsha
+`,
+  );
+  assert.equal(parseYamlLite(updated).allow[0].seen_in, "newsha");
+  assert.equal(parseYamlLite(updated).allow[0].reason, "chameidor has no domain-error type and drives the 4xx WARN from the response status instead");
+});
+
 test("updateSentinelText: appends an applied block when the sentinel has none", () => {
   const updated = updateSentinelText("source: python\nlane: backend\n", { revision: 3, scaffoldSha: "ccc333" });
   assert.equal(updated, "source: python\nlane: backend\napplied:\n  revision: 3\n  scaffold_sha: ccc333\n");
@@ -382,8 +414,10 @@ function scaffoldFixture(base, changes) {
   return { dir, pin, target };
 }
 
-function sentinelText({ source = "react", lane = "frontend", revision = 1, scaffoldSha, allow = [] }) {
-  let text = `source: ${source}\nlane: ${lane}\napplied:\n  revision: ${revision}\n  scaffold_sha: ${scaffoldSha}\n`;
+function sentinelText({ source = "react", lane = "frontend", name, revision = 1, scaffoldSha, allow = [] }) {
+  let text = `source: ${source}\nlane: ${lane}\n`;
+  if (name) text += `name: ${name}\n`;
+  text += `applied:\n  revision: ${revision}\n  scaffold_sha: ${scaffoldSha}\n`;
   if (allow.length > 0) {
     text += "allow:\n";
     for (const item of allow) {
@@ -563,6 +597,35 @@ test("runPropagate: an owned path containing the token lands on the lane's insta
   assert.equal(existsSync(join(inspect, "frontend/src/template")), false, "the token path must not survive in the lane");
   // The scaffold side is untouched: the reference file stays under the token path.
   assert.equal(existsSync(join(scaffold.dir, "react/src/template/telemetry.md")), true);
+});
+
+test("runPropagate: a sentinel name lands token-bearing entries on the instantiated path", () => {
+  const base = mkdtempSync(join(tmpdir(), "template-propagate-name-"));
+  const scaffold = scaffoldFixture(base, { "src/template/telemetry.md": "contract v2\n" });
+  const project = projectFixture(base, {
+    name: "portfolio-2",
+    lanes: [
+      {
+        lane: "frontend",
+        sentinel: sentinelText({ scaffoldSha: scaffold.pin, name: "portfolio" }),
+        files: {
+          "check/ok.mjs": OK_CHECK,
+          "src/portfolio/telemetry.md": "contract v1\n",
+        },
+      },
+    ],
+  });
+  const result = propagate(base, { dryRun: false, gh: fakeGh() });
+  assert.equal(result.failures, 0);
+  assert.deepEqual(
+    result.repos[0].lanes[0].applies
+      .filter((apply) => apply.file.startsWith("src/template/"))
+      .map((apply) => [apply.file, apply.target]),
+    [["src/template/telemetry.md", "src/portfolio/telemetry.md"]],
+  );
+  const inspect = cloneBranch(base, project.remote, result.repos[0].branch, "inspect-name");
+  assert.equal(lf(readFileSync(join(inspect, "frontend/src/portfolio/telemetry.md"), "utf8")), "contract v2\n");
+  assert.equal(existsSync(join(inspect, "frontend/src/portfolio-2")), false, "the directory name must not become the package");
 });
 
 test("runPropagate: a mode-only move on an owned file is applied and committed", () => {

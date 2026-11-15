@@ -244,12 +244,13 @@ export function rewriteProjectManifest({ entries, token = null, name = null }) {
 // One sentinel per lane; creation is revision 1, the scaffold_sha is the immutable pin. The
 // `note` says who stamped it ("creation", or "bootstrap" when the applier stamps an existing
 // project's lineage); only the applier ever advances `applied` afterwards.
-export function sentinelText({ source, lane, scaffoldSha, revision = 1, note = "creation" }) {
+export function sentinelText({ source, lane, name, scaffoldSha, revision = 1, note = "creation" }) {
   return [
     `# Lane lineage for the ${source} scaffold: written at ${note}, advanced only by propagation.`,
     "# `allow` records accepted divergences ({ entry, reason }).",
     `source: ${source}`,
     `lane: ${lane}`,
+    ...(name ? [`name: ${name}`] : []),
     "applied:",
     `  revision: ${revision}`,
     `  scaffold_sha: ${scaffoldSha}`,
@@ -728,7 +729,7 @@ export function createProject({
 
   const sentinelPath = join(projectRoot, ".salgadinhos", `${sentinelFileName(laneDir)}.yml`);
   mkdirSync(dirname(sentinelPath), { recursive: true });
-  writeFileSync(sentinelPath, sentinelText({ source: stack, lane: laneDir, scaffoldSha }), "utf8");
+  writeFileSync(sentinelPath, sentinelText({ source: stack, lane: laneDir, name, scaffoldSha }), "utf8");
   writeFileSync(portsRecordPath(projectRoot), portsJsonText(chosenPorts), "utf8");
 
   const leftovers = findTokenLeftovers(laneAbs, { token, keep });
