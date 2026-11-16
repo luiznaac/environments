@@ -10,6 +10,14 @@ Not an application. A **starter skeleton** for a Python backend service, deliber
 
 - [`docs/code-map.md`](docs/code-map.md)
 
+The literal boot and check commands live in [`README.md`](README.md).
+
+## Documentation
+
+- [Family repository documentation standard](https://github.com/luiznaac/salgadinhos/blob/master/docs/salgadinhos/documentation-standard.md) — the README content model, the mandatory doc set and the audit checklist.
+- `refresh-docs` skill in the same repo — the read-only audit and the in-place refresh.
+- Trigger: a change the standard's change-kind matrix names runs the audit before the PR.
+
 ## Architecture
 
 Layered hexagonal. **Dependencies only point inward.** Enforced by `import-linter` (`uv run poe contracts`), which fails the build on violation — the equivalent of the Gradle module graph in `kotlin/`.

@@ -834,6 +834,11 @@ function realCodeRoot() {
   return root;
 }
 
+function assertCreatedDocs(lane, name) {
+  assert.match(readFileSync(join(lane, "README.md"), "utf8"), new RegExp(`^# ${name}$`, "m"), "the README H1 is the project name");
+  assert.ok(existsSync(join(lane, "CONTEXT.md")), "the domain-glossary stub is copied");
+}
+
 test("committed manifests: the live scaffolds declare the creation data", () => {
   const kotlin = loadManifest(join(REPO_ROOT, "kotlin", ".salgadinhos", "manifest.yml")).instantiate;
   assert.equal(kotlin.lane, "backend");
@@ -862,6 +867,63 @@ test("committed manifests: the live scaffolds declare the creation data", () => 
   assert.equal(react.values.port.default, "8080");
   assert.equal(react.values.frontendDevPort.default, "5273");
   assert.equal(react.values.basePath.style, "whole", "the base path override is the full path");
+});
+
+test("committed scaffolds: README and CONTEXT are judgment entries and the stack topics are declared", () => {
+  for (const stack of ["kotlin", "python", "react", "php"]) {
+    const manifest = loadManifest(join(REPO_ROOT, stack, ".salgadinhos", "manifest.yml"));
+    assert.equal(manifest.entries["README.md"]?.class, "judgment", `${stack}: README is a judgment entry`);
+    assert.equal(manifest.entries["CONTEXT.md"]?.class, "judgment", `${stack}: CONTEXT is a judgment entry`);
+    assert.ok(manifest.topics.length >= 1, `${stack}: declares its stack topics`);
+    assert.ok(existsSync(join(REPO_ROOT, stack, "README.md")), `${stack}: ships README.md`);
+    assert.ok(existsSync(join(REPO_ROOT, stack, "CONTEXT.md")), `${stack}: ships CONTEXT.md`);
+  }
+});
+
+test("committed scaffolds: every README carries the frozen headings, literal commands and resolving doc links", () => {
+  for (const stack of ["kotlin", "python", "react", "php"]) {
+    const readme = readFileSync(join(REPO_ROOT, stack, "README.md"), "utf8");
+    const headings = [...readme.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
+    const spine = headings.filter((heading) => ["Quickstart", "Checks", "Docs"].includes(heading));
+    assert.deepEqual(spine, ["Quickstart", "Checks", "Docs"], `${stack}: the three frozen headings, in order`);
+    for (const [, fence] of readme.matchAll(/```[^\n]*\n([\s\S]*?)```/g)) {
+      assert.ok(!/<[A-Z][A-Z0-9_]*>/.test(fence), `${stack}: no placeholder command inside a fence`);
+      assert.ok(!/\$YOUR_/.test(fence), `${stack}: no placeholder variable inside a fence`);
+    }
+    for (const [, target] of readme.matchAll(/\]\((?!https?:)([^)#]+)\)/g)) {
+      assert.ok(existsSync(join(REPO_ROOT, stack, target)), `${stack}: README link resolves: ${target}`);
+    }
+  }
+});
+
+test("committed scaffolds: ## Docs indexes only the slots that exist at birth", () => {
+  const allowed = new Set(["docs/code-map.md", "AGENTS.md", "CONTEXT.md", "CODING_STANDARDS.md"]);
+  for (const stack of ["kotlin", "python", "react", "php"]) {
+    const readme = readFileSync(join(REPO_ROOT, stack, "README.md"), "utf8");
+    const section = readme.split(/^## /m).find((part) => part.startsWith("Docs\n"));
+    assert.ok(section, `${stack}: has a ## Docs section`);
+    for (const [, target] of section.matchAll(/\]\(([^)]+)\)/g)) {
+      assert.ok(allowed.has(target), `${stack}: ## Docs links a birth slot, not ${target}`);
+    }
+  }
+});
+
+test("committed scaffolds: every AGENTS.md carries the resolving links-only ## Documentation index", () => {
+  const files = [
+    join(REPO_ROOT, "AGENTS.md"),
+    ...["kotlin", "python", "react", "php"].map((stack) => join(REPO_ROOT, stack, "AGENTS.md")),
+  ];
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    const section = text.split(/^## /m).find((part) => part.startsWith("Documentation\n"));
+    assert.ok(section, `${file}: has a ## Documentation section`);
+    assert.match(section, /documentation-standard\.md/, `${file}: points at the standard`);
+    assert.match(
+      section,
+      /\]\(https:\/\/github\.com\/luiznaac\/salgadinhos\/blob\/master\//,
+      `${file}: the standard link is absolute`,
+    );
+  }
 });
 
 test("committed manifests: compose and env files are judgment entries and stale literals are gone", () => {
@@ -906,6 +968,7 @@ test("real scaffold: kotlin creates a renamed lane with the manifest copy and th
   const result = runCli(root, ["--code-root", root, "--stack", "kotlin", "--name", "widget", "--skip-check", "--skip-guard"]);
   assert.equal(result.status, 0, result.stderr);
   const lane = join(root, "widget", "backend");
+  assertCreatedDocs(lane, "widget");
   assert.match(readFileSync(join(lane, "settings.gradle.kts"), "utf8"), /rootProject\.name = "widget"/);
   assert.match(readFileSync(join(lane, "build.gradle.kts"), "utf8"), /group = "dev\.agner\.widget"/);
   assert.match(readFileSync(join(lane, "docker-compose.yml"), "utf8"), /MYSQL_DATABASE=widget/);
@@ -932,6 +995,7 @@ test("real scaffold: python creates a renamed lane", () => {
   const result = runCli(root, ["--code-root", root, "--stack", "python", "--name", "widget", "--skip-check", "--skip-guard"]);
   assert.equal(result.status, 0, result.stderr);
   const lane = join(root, "widget", "backend");
+  assertCreatedDocs(lane, "widget");
   assert.ok(existsSync(join(lane, "src", "widget", "application", "boot.py")));
   const pyproject = readFileSync(join(lane, "pyproject.toml"), "utf8");
   assert.match(pyproject, /^name = "widget"/m);
@@ -947,6 +1011,7 @@ test("real scaffold: react creates a renamed lane with scoped dependency metadat
   const result = runCli(root, ["--code-root", root, "--stack", "react", "--name", "widget", "--skip-check", "--skip-guard"]);
   assert.equal(result.status, 0, result.stderr);
   const lane = join(root, "widget", "frontend");
+  assertCreatedDocs(lane, "widget");
   assert.equal(JSON.parse(readFileSync(join(lane, "package.json"), "utf8")).name, "widget-fe");
   assert.equal(JSON.parse(readFileSync(join(lane, "package-lock.json"), "utf8")).name, "widget-fe");
   assert.match(readFileSync(join(lane, "package-lock.json"), "utf8"), /"@babel\/template"/);

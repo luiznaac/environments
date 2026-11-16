@@ -26,3 +26,11 @@ Git/PR conventions: see `salgadinhos/global/AGENTS.md`.
 ## Code map
 
 - [`docs/code-map.md`](docs/code-map.md)
+
+The literal boot and check commands live in [`README.md`](README.md).
+
+## Documentation
+
+- [Family repository documentation standard](https://github.com/luiznaac/salgadinhos/blob/master/docs/salgadinhos/documentation-standard.md) — the README content model, the mandatory doc set and the audit checklist.
+- `refresh-docs` skill in the same repo — the read-only audit and the in-place refresh.
+- Trigger: a change the standard's change-kind matrix names runs the audit before the PR.

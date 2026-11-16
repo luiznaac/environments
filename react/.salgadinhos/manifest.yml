@@ -10,6 +10,10 @@ entries:
   AGENTS.md: judgment
   # A lane hand-authors its own map; a scaffold change here is a porting judgment, never an overwrite.
   docs/code-map.md: judgment
+  # A lane rewrites its entry page for its product; a scaffold change here is a porting judgment.
+  README.md: judgment
+  # A lane's glossary is born with its first term; a scaffold change here is a porting judgment.
+  CONTEXT.md: judgment
   CODING_STANDARDS.md: owned
   package.json:
     class: pinned
@@ -27,6 +31,10 @@ entries:
   tsconfig.json: owned
   tsconfig.app.json: owned
   tsconfig.node.json: owned
+
+# Stack topics the repo page carries at creation (the documentation standard's closed list). The
+# surface kind and domain tags are project facts the creation skill adds from the same standard.
+topics: [react]
 
 # The scaffold's own `check` script: typecheck + Biome + Vitest, no browser or Docker.
 check:

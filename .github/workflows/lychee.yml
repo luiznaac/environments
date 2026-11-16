@@ -17,11 +17,17 @@ jobs:
       # them rather than leave the check permanently red. Match on the
       # path segment only: lychee tests the regex against the fully
       # resolved file:// URL, which differs between machines.
+      #
+      # The `## Documentation` index links the family documentation standard,
+      # which lives in the private `salgadinhos` repo: it resolves for a family
+      # member (and the audit), never for an unauthenticated CI runner, so the
+      # path segment is excluded for the same reason.
       - uses: lycheeverse/lychee-action@v2
         with:
           args: >-
             --no-progress --exclude-loopback
             --exclude 'chameidor/'
             --exclude 'portfolio-2/'
+            --exclude 'salgadinhos/'
             "**/*.md"
           fail: true

@@ -13,6 +13,10 @@ entries:
   AGENTS.md: judgment
   # A lane hand-authors its own map; a scaffold change here is a porting judgment, never an overwrite.
   docs/code-map.md: judgment
+  # A lane rewrites its entry page for its product; a scaffold change here is a porting judgment.
+  README.md: judgment
+  # A lane's glossary is born with its first term; a scaffold change here is a porting judgment.
+  CONTEXT.md: judgment
   # The telemetry standard every lane is reviewed against; the scaffold owns the text.
   docs/observability.md: owned
   CODING_STANDARDS.md: owned
@@ -46,6 +50,10 @@ entries:
       - tool.ruff.lint
       - tool.mypy
       - tool.importlinter
+
+# Stack topics the repo page carries at creation (the documentation standard's closed list). The
+# surface kind and domain tags are project facts the creation skill adds from the same standard.
+topics: [python]
 
 # `poe check` is the repo's own fast gate: lint, format, types, layer contracts and unit tests
 # (not the Docker-backed integration suite — that runs in CI on the PR).

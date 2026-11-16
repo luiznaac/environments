@@ -3,9 +3,16 @@
 # judgment), `instantiate` names the scaffold and `check` is the lane's fast check; the class
 # semantics live in environments/AGENTS.md ("Propagation: manifests, template-check and
 # template-propagate").
-# The php scaffold is a bare toolchain setup with no consumer yet (deferred until one exists),
-# so nothing is mechanically watched and `entries` stays empty until a project classifies it.
-entries: {}
+# The php scaffold is a bare toolchain setup with no consumer yet (deferred until one exists), so
+# only the documentation stubs are classified; both are judgment, so nothing propagates mechanically
+# until a project classifies the rest.
+entries:
+  README.md: judgment
+  CONTEXT.md: judgment
+
+# Stack topics the repo page carries at creation (the documentation standard's closed list). The
+# surface kind and domain tags are project facts the creation skill adds from the same standard.
+topics: [php]
 
 instantiate:
   # No placeholder token yet: Base.php / BaseTest.php are placeholders to replace, not a name
