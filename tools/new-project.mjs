@@ -763,7 +763,7 @@ export function createProject({
     if (result.error || result.status !== 0) throw new CreationError("master guard installation failed (pass --skip-guard to skip it)");
   }
 
-  return { projectRoot, laneDir, laneAbs, sentinelPath, scaffoldSha, appliedValues, ports: chosenPorts, check, skippedCheck: skipCheck || !check, skippedGuard: skipGuard };
+  return { projectRoot, laneDir, laneAbs, sentinelPath, scaffoldSha, appliedValues, ports: chosenPorts, check, topics: manifest.topics, skippedCheck: skipCheck || !check, skippedGuard: skipGuard };
 }
 
 // ---------------------------------------------------------------------------
@@ -852,6 +852,7 @@ function main(argv) {
       `[new-project]   ports: api ${result.ports.api}, web ${result.ports.web}, mysql ${result.ports.mysql}, frontendDev ${result.ports.frontendDev} (.salgadinhos/ports.json)`,
     );
     console.log(`[new-project]   overrides: ${result.appliedValues.length > 0 ? result.appliedValues.join(", ") : "none"}`);
+    console.log(`[new-project]   stack topics: ${result.topics.length > 0 ? result.topics.join(", ") : "none declared"}`);
     console.log(`[new-project]   fast check: ${result.skippedCheck ? "skipped" : result.check}`);
     console.log(`[new-project]   master guard: ${result.skippedGuard ? "skipped" : "installed"}`);
     console.log("[new-project] next: remote repo, CI, secrets, domain and first deploy — the creation skill drives them");

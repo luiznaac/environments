@@ -327,11 +327,24 @@ test("loadManifest: python manifest merges pyproject sections", () => {
   assert.equal(manifest.check.command, "uv run poe check");
 });
 
-test("loadManifest: php manifest is empty and has no rename token yet", () => {
+test("loadManifest: php manifest classifies the documentation stubs and has no rename token yet", () => {
   const manifest = loadManifest(join(REPO_ROOT, "php", ".salgadinhos", "manifest.yml"));
-  assert.deepEqual(manifest.entries, {});
+  assert.deepEqual(Object.keys(manifest.entries), ["README.md", "CONTEXT.md"]);
+  assert.equal(manifest.entries["README.md"].class, "judgment");
+  assert.equal(manifest.entries["CONTEXT.md"].class, "judgment");
+  assert.deepEqual(manifest.topics, ["php"]);
   assert.equal(manifest.instantiate.name, null);
   assert.equal(manifest.check.command, null);
+});
+
+test("loadManifest: stack topics are a list of lowercase hyphen-separated values", () => {
+  const ok = makeTree({ "manifest.yml": "entries: {}\ntopics: [kotlin, node]\n" });
+  assert.deepEqual(loadManifest(join(ok, "manifest.yml")).topics, ["kotlin", "node"]);
+  const bad = makeTree({ "manifest.yml": "entries: {}\ntopics: [Kotlin]\n" });
+  assert.throws(
+    () => loadManifest(join(bad, "manifest.yml")),
+    (error) => error instanceof ConfigError && /lowercase/.test(error.message),
+  );
 });
 
 test("loadManifest: check declares the lane's fast check and its timeout", () => {

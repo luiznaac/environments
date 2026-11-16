@@ -1,31 +1,38 @@
-# python
+# template
 
-A working Python backend service skeleton — the same layered hexagonal architecture as the `kotlin/` scaffold, using today's Python tooling: HTTP server (FastAPI), a hand-written composition root instead of a DI framework, async database access (SQLAlchemy 2 / MySQL), outbound HTTP (httpx), Docker, linting/formatting (Ruff), types (mypy `--strict`), architecture enforcement (import-linter), and an integration-test harness (Testcontainers) — all wired together and demonstrated end-to-end through one working example endpoint (a health check).
+A Python backend service for a project's HTTP API, with MySQL persistence, built on FastAPI and SQLAlchemy with a hexagonal layout.
 
-## Quick start
+## Quickstart
+
+Python 3.12 and Docker.
 
 ```bash
-uv sync                       # create .venv + install everything
-uv run poe run                # start the service on http://localhost:8080 (needs MySQL — see below)
-docker compose up -d mysql    # local MySQL on :3306 (or $MYSQL__PORT)
-curl localhost:8080/health
+uv sync
+docker compose up -d mysql
+uv run poe run
 ```
 
-## Tasks (`uv run poe <task>`)
+The API listens on `http://localhost:8080`; MySQL publishes on `localhost:3306`.
 
-| task               | what it does                                            |
-|--------------------|--------------------------------------------------------|
-| `run`              | module entrypoint on `HTTP_PORT` (reload in `dev`)      |
-| `lint` / `format`  | Ruff                                                    |
-| `typecheck`        | mypy `--strict`                                         |
-| `contracts`        | import-linter (layer rules)                             |
-| `test`             | all tests                                               |
-| `test-unit`        | unit tests only (no Docker)                             |
-| `test-integration` | integration tests (needs a Docker daemon)              |
-| `check`            | everything CI runs                                      |
+<!-- TODO: replace the prerequisites with the product's own and paste the real /health output transcript here. -->
 
-## Starting a new project from it
+## Checks
 
-New projects are instantiated by the `new-project` script in `environments`, which applies the package/pyproject/Dockerfile/database renames from the manifest's `instantiate:` section, stamps the lane sentinel and makes the first commit. Don't copy and rename by hand.
+```bash
+uv run poe lint       # Ruff
+uv run poe typecheck  # mypy --strict
+uv run poe test       # pytest, integration suite included (needs Docker)
+uv run poe check && uv run poe test-integration   # the canonical all-checks command
+```
 
-See [AGENTS.md](AGENTS.md) for the architecture and the rules for evolving it.
+<!-- TODO: name any extra check the product adds. -->
+
+## Docs
+
+- [Code map](docs/code-map.md) — module, seam and entry-point navigation; open it when you need to find where a change lands.
+- [Repository conventions](AGENTS.md) — architecture, wiring rules and the feature walkthrough; open it before adding a feature.
+- [Domain glossary](CONTEXT.md) — the project's vocabulary; open it when a term is unclear.
+- [Coding standards — Python lane](CODING_STANDARDS.md) — the idiom rules the tooling does not enforce; open it before writing code.
+- Added on use: `docs/adr/` with the first ADR, `docs/runbooks/` with the first operational story, and `docs/research/` and topical docs as they are written.
+
+<!-- TODO: add the product's topical docs here as they are born. -->

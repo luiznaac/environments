@@ -8,6 +8,12 @@ Development guidelines for anyone (human, agent, or tool) working in this reposi
 
 There are four independent scaffolds, `kotlin/`, `python/`, `php/`, and `react/`. They do not share code or tooling with each other — treat them as separate repositories that happen to live in the same place. (The root-level `tools/` reads every scaffold's `.salgadinhos/manifest.yml`, but that's the propagation machinery aimed at the scaffolds, not shared scaffold code.) `kotlin/` and `python/` deliberately share the *same architecture* (see below), so a change to the shape of one should usually be mirrored in the other. `react/` is what every project's `frontend/` was generated from — see [react/AGENTS.md](react/AGENTS.md).
 
+## Documentation
+
+- [Family repository documentation standard](https://github.com/luiznaac/salgadinhos/blob/master/docs/salgadinhos/documentation-standard.md) — the README content model, the mandatory doc set and the audit checklist.
+- `refresh-docs` skill in the same repo — the read-only audit and the in-place refresh.
+- Trigger: a change the standard's change-kind matrix names runs the audit before the PR; a scaffold change that touches an inherited stub is a manifest classification like any other watched path.
+
 ## Flow
 
 A scaffold diff names its propagation outcome before the PR. Every changed path that the scaffold's `.salgadinhos/manifest.yml` watches is classified by its entry; the PR body's `## Propagation` carries the outcome — the mechanical class (`owned`/`pinned`/`merge`) that will carry it to the lanes, a `Judgment: #<issue>` follow-up for the porting skill, or `None: <reason>` when no watched path changed. The body-shape guard rejects a scaffold PR body without a valid outcome.
@@ -84,7 +90,7 @@ Each scaffold carries `.salgadinhos/manifest.yml` — the classification the pro
 
 `watch` is valid only on `owned`, and `mode` is its only value — anything else is a config error at manifest loading. It exists for files whose *content* is the lane's business but whose *bit* is the scaffold's: the Kotlin `gradlew` is the case that motivated it (a lane's older wrapper and jar must survive propagation while the script stays executable). The sweep advisory lists a mode-only entry as mechanical queue only when the bit moved between the lane's pin and the target; a content-only bump is not actionable.
 
-`instantiate.name` is the scaffold's own name token (`template`); creation tooling replaces it word-boundedly with the project name, and both tools reuse it to normalize scaffold files — and their lane-side paths — against a project. `check.command` (optional) is the lane's fast check and `check.timeout_seconds` its optional budget (default 15 min, `--check-timeout` overrides); the applier runs it before opening a PR. The watchlist is deliberately curated — add an entry only when the project family really should converge on it.
+`instantiate.name` is the scaffold's own name token (`template`); creation tooling replaces it word-boundedly with the project name, and both tools reuse it to normalize scaffold files — and their lane-side paths — against a project. `check.command` (optional) is the lane's fast check and `check.timeout_seconds` its optional budget (default 15 min, `--check-timeout` overrides); the applier runs it before opening a PR. `topics:` is the scaffold's stack-topic list for the repo page (the documentation standard's closed Stack list); the creation skill adds the surface kind and domain tags, so it is creation data and never a watchlist entry. The watchlist is deliberately curated — add an entry only when the project family really should converge on it.
 
 Projects are discovered by globbing for `.salgadinhos/<lane>.yml` sentinels (one per lane: `source`, `lane`, optional `name`, `applied`, `allow`) — stamped by the creation script / applier, never hand-written (for a project that predates the tooling, the applier's `--bootstrap` stamps it). `name` is the instantiated project name when it differs from the checkout directory (`portfolio-2` carries the `portfolio` package); absent, discovery uses the directory name. `applied.scaffold_sha` is the immutable pin (which scaffold commit the lane last absorbed); `applied.revision` is a per-lane counter, for audit — not the from→to unit. `allow: [{ entry, reason, seen_in? }]` is how a lane records an accepted divergence.
 

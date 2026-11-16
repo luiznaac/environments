@@ -13,6 +13,10 @@ entries:
   AGENTS.md: judgment
   # A lane hand-authors its own map; a scaffold change here is a porting judgment, never an overwrite.
   docs/code-map.md: judgment
+  # A lane rewrites its entry page for its product; a scaffold change here is a porting judgment.
+  README.md: judgment
+  # A lane's glossary is born with its first term; a scaffold change here is a porting judgment.
+  CONTEXT.md: judgment
   # The telemetry standard every lane is reviewed against; the scaffold owns the text.
   docs/observability.md: owned
   CODING_STANDARDS.md: owned
@@ -70,6 +74,10 @@ entries:
   integrationTest/src/test/kotlin/dev/agner/template/integrationTest/config/StopKtorServer.kt: judgment
   integrationTest/src/test/kotlin/dev/agner/template/integrationTest/tests/HarnessContractTest.kt: judgment
   integrationTest/src/test/kotlin/dev/agner/template/integrationTest/tests/MigrationSchemaTest.kt: judgment
+
+# Stack topics the repo page carries at creation (the documentation standard's closed list). The
+# surface kind and domain tags are project facts the creation skill adds from the same standard.
+topics: [kotlin]
 
 # The verification ladder's first two rungs: compile first (allWarningsAsErrors makes the
 # compiler the strictest gate), then detekt for the configs this manifest watches.

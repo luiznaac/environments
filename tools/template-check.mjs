@@ -509,7 +509,21 @@ export function loadManifest(manifestPath) {
       check.timeoutSeconds = seconds;
     }
   }
-  return { entries, instantiate: parseInstantiate(parsed?.instantiate, manifestPath), check };
+  // Stack topics the repo page carries at creation (the documentation standard's closed list);
+  // lowercase and hyphen-separated. The surface kind and domain tags are project facts the
+  // creation skill adds, so they are not part of a scaffold manifest.
+  const rawTopics = parsed?.topics;
+  const topics = [];
+  if (rawTopics != null) {
+    if (!Array.isArray(rawTopics)) throw new ConfigError(`${manifestPath}: 'topics' must be a list`);
+    for (const topic of rawTopics) {
+      if (typeof topic !== "string" || !/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(topic)) {
+        throw new ConfigError(`${manifestPath}: topic '${topic}' must be lowercase and hyphen-separated`);
+      }
+      topics.push(topic);
+    }
+  }
+  return { entries, instantiate: parseInstantiate(parsed?.instantiate, manifestPath), check, topics };
 }
 
 export function loadSentinel(sentinelPath) {
