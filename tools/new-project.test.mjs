@@ -882,7 +882,7 @@ test("committed scaffolds: README and CONTEXT are judgment entries and the stack
 
 test("committed scaffolds: every README carries the frozen headings, literal commands and resolving doc links", () => {
   for (const stack of ["kotlin", "python", "react", "php"]) {
-    const readme = readFileSync(join(REPO_ROOT, stack, "README.md"), "utf8");
+    const readme = readFileSync(join(REPO_ROOT, stack, "README.md"), "utf8").replace(/\r\n/g, "\n");
     const headings = [...readme.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
     const spine = headings.filter((heading) => ["Quickstart", "Checks", "Docs"].includes(heading));
     assert.deepEqual(spine, ["Quickstart", "Checks", "Docs"], `${stack}: the three frozen headings, in order`);
@@ -899,7 +899,7 @@ test("committed scaffolds: every README carries the frozen headings, literal com
 test("committed scaffolds: ## Docs indexes only the slots that exist at birth", () => {
   const allowed = new Set(["docs/code-map.md", "AGENTS.md", "CONTEXT.md", "CODING_STANDARDS.md"]);
   for (const stack of ["kotlin", "python", "react", "php"]) {
-    const readme = readFileSync(join(REPO_ROOT, stack, "README.md"), "utf8");
+    const readme = readFileSync(join(REPO_ROOT, stack, "README.md"), "utf8").replace(/\r\n/g, "\n");
     const section = readme.split(/^## /m).find((part) => part.startsWith("Docs\n"));
     assert.ok(section, `${stack}: has a ## Docs section`);
     for (const [, target] of section.matchAll(/\]\(([^)]+)\)/g)) {
@@ -914,7 +914,7 @@ test("committed scaffolds: every AGENTS.md carries the resolving links-only ## D
     ...["kotlin", "python", "react", "php"].map((stack) => join(REPO_ROOT, stack, "AGENTS.md")),
   ];
   for (const file of files) {
-    const text = readFileSync(file, "utf8");
+    const text = readFileSync(file, "utf8").replace(/\r\n/g, "\n");
     const section = text.split(/^## /m).find((part) => part.startsWith("Documentation\n"));
     assert.ok(section, `${file}: has a ## Documentation section`);
     assert.match(section, /documentation-standard\.md/, `${file}: points at the standard`);
