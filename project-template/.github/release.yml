@@ -1,0 +1,31 @@
+# Categories for the release notes GitHub generates from merged pull requests. An authored
+# CHANGELOG.md entry and notes file carry the curated prose; this only shapes the fallback.
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+    authors:
+      - dependabot
+      - github-actions
+  categories:
+    - title: Breaking changes
+      labels:
+        - breaking
+        - breaking-change
+    - title: Features
+      labels:
+        - feature
+        - enhancement
+    - title: Fixes
+      labels:
+        - fix
+        - bug
+        - bugfix
+    - title: Maintenance
+      labels:
+        - chore
+        - dependencies
+        - documentation
+    - title: Other changes
+      labels:
+        - "*"

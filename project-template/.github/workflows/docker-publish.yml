@@ -1,0 +1,63 @@
+name: Docker publish
+
+# A release is a deliberate `v*` tag on master (cut by scripts/release.sh), never a merge.
+# This workflow builds the project's one root image and:
+#   - on a `v*` tag: publishes immutable semver, major.minor and short-SHA tags, moving `latest`;
+#   - on a pull request: builds the same image with push disabled, to catch a broken Dockerfile;
+#   - on a manual dispatch of a release ref: re-publishes that release (a hotfix path).
+# Nothing here ever tags an image with `github.run_number`.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Superseded pull-request runs are cancelled to save Actions minutes. Publish runs are never
+# cancelled: `cancel-in-progress` is true for a pull_request event only, and every tag gets its
+# own group.
+concurrency:
+  group: docker-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Log in only when this run can publish (a v* release ref); PR runs never touch secrets.
+      - name: Log in to Docker Hub
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # The project's image reference; creation rewrites the `template` token.
+          images: luiznaac/template
+          # `latest` is emitted by the guarded raw tag below alone, never implicitly.
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Publish only for a v* release ref; a pull request builds the image with push: false.
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
