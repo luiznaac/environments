@@ -558,7 +558,7 @@ const createArgs = (fix, extra = []) => ["--code-root", fix.root, "--stack", "mi
 
 test("cli: creates the lane, renaming paths, contents and JSON package names", () => {
   const fix = miniCodeRoot();
-  const result = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 0, result.stderr);
   const lane = join(fix.root, "widget", "backend");
   assert.ok(existsSync(join(lane, "src", "widget", "util", "helper.py")), "directories carrying the token are renamed");
@@ -576,7 +576,7 @@ test("cli: keeps an executable file's mode in the created lane", () => {
   const environments = join(fix.root, "environments");
   git(environments, ["update-index", "--chmod=+x", "mini/gradlew"]);
   git(environments, ["-c", "user.name=test", "-c", "user.email=test@example.test", "commit", "-q", "-m", "chmod gradlew"]);
-  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"])).status, 0);
+  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--skip-vendor"])).status, 0);
   if (process.platform !== "win32") {
     assert.match(git(join(fix.root, "widget", "backend"), ["ls-files", "-s", "--", "gradlew"]), /^100755 /);
   }
@@ -584,7 +584,7 @@ test("cli: keeps an executable file's mode in the created lane", () => {
 
 test("cli: the project manifest keeps the entries and drops instantiate", () => {
   const fix = miniCodeRoot();
-  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"])).status, 0);
+  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--skip-vendor"])).status, 0);
   const copied = loadManifest(join(fix.root, "widget", "backend", ".salgadinhos", "manifest.yml"));
   const original = loadManifest(join(fix.root, "environments", "mini", ".salgadinhos", "manifest.yml"));
   assert.deepEqual(copied.entries, original.entries);
@@ -594,7 +594,7 @@ test("cli: the project manifest keeps the entries and drops instantiate", () => 
 
 test("cli: stamps the lane sentinel with source, lane, revision 1 and the scaffold sha", () => {
   const fix = miniCodeRoot();
-  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"])).status, 0);
+  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--skip-vendor"])).status, 0);
   const parsed = parseYamlLite(readFileSync(join(fix.root, "widget", ".salgadinhos", "backend.yml"), "utf8"));
   assert.deepEqual(parsed, {
     source: "mini",
@@ -607,7 +607,7 @@ test("cli: stamps the lane sentinel with source, lane, revision 1 and the scaffo
 
 test("cli: commits the created project as the first commit on master", () => {
   const fix = miniCodeRoot();
-  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"])).status, 0);
+  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--skip-vendor"])).status, 0);
   const project = join(fix.root, "widget");
   assert.equal(git(project, ["rev-list", "--count", "HEAD"]), "1");
   assert.equal(git(project, ["rev-parse", "--abbrev-ref", "HEAD"]), "master");
@@ -616,7 +616,7 @@ test("cli: commits the created project as the first commit on master", () => {
 
 test("cli: text files are copied LF-canonical and batch files keep their ending", () => {
   const fix = miniCodeRoot({ files: { ...MINI_FILES, "crlf.txt": "a\r\nb\r\n", "run.bat": "@echo off\r\necho template\r\n" } });
-  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"])).status, 0);
+  assert.equal(runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--skip-vendor"])).status, 0);
   const lane = join(fix.root, "widget", "backend");
   assert.equal(readFileSync(join(lane, "crlf.txt"), "utf8"), "a\nb\n");
   assert.equal(readFileSync(join(lane, "run.bat"), "utf8"), "@echo off\r\necho widget\r\n");
@@ -624,14 +624,14 @@ test("cli: text files are copied LF-canonical and batch files keep their ending"
 
 test("cli: runs the fast check in the created lane", () => {
   const fix = miniCodeRoot();
-  const result = runCli(fix.root, createArgs(fix, ["--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(join(fix.root, "widget", "backend", "check-ran.txt"), "utf8"), join(fix.root, "widget", "backend"));
 });
 
 test("cli: a failing fast check aborts creation before the first commit", () => {
   const fix = miniCodeRoot({ manifest: MINI_MANIFEST.replace(/check: .*/, 'check: node -e "process.exit(3)"') });
-  const result = runCli(fix.root, createArgs(fix, ["--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 1);
   assert.match(result.stderr, /fast check failed/);
   assert.ok(!existsSync(join(fix.root, "widget", ".git")), "nothing is committed when the check is not green");
@@ -639,14 +639,14 @@ test("cli: a failing fast check aborts creation before the first commit", () => 
 
 test("cli: refuses an override the stack does not declare", () => {
   const fix = miniCodeRoot();
-  const result = runCli(fix.root, createArgs(fix, ["--image", "luiznaac/widget", "--skip-check", "--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--image", "luiznaac/widget", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 2);
   assert.match(result.stderr, /no 'image' value to override/);
 });
 
 test("cli: --lane overrides the manifest lane and names the sentinel after it", () => {
   const fix = miniCodeRoot();
-  const result = runCli(fix.root, createArgs(fix, ["--lane", "apps/api", "--skip-check", "--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--lane", "apps/api", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 0, result.stderr);
   assert.ok(existsSync(join(fix.root, "widget", "apps", "api", "db.txt")));
   const parsed = parseYamlLite(readFileSync(join(fix.root, "widget", ".salgadinhos", "apps-api.yml"), "utf8"));
@@ -655,7 +655,7 @@ test("cli: --lane overrides the manifest lane and names the sentinel after it", 
 
 test("cli: refuses a stack without an instantiate name (php deferred)", () => {
   const scratch = mkdtempSync(join(tmpdir(), "new-project-"));
-  const result = runCli(REPO_ROOT, ["--stack", "php", "--name", "widget", "--to", join(scratch, "widget"), "--skip-check", "--skip-guard"]);
+  const result = runCli(REPO_ROOT, ["--stack", "php", "--name", "widget", "--to", join(scratch, "widget"), "--skip-check", "--skip-guard", "--skip-vendor"]);
   assert.equal(result.status, 2);
   assert.match(result.stderr, /no instantiate\.name/);
 });
@@ -664,10 +664,10 @@ test("cli: refuses a non-empty target unless --force", () => {
   const fix = miniCodeRoot();
   mkdirSync(join(fix.root, "widget"), { recursive: true });
   writeFileSync(join(fix.root, "widget", "keep.txt"), "occupied\n");
-  const refused = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"]));
+  const refused = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(refused.status, 2);
   assert.match(refused.stderr, /not empty/);
-  const forced = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--force"]));
+  const forced = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--skip-vendor", "--force"]));
   assert.equal(forced.status, 0, forced.stderr);
   assert.ok(existsSync(join(fix.root, "widget", "backend", "db.txt")));
 });
@@ -676,7 +676,7 @@ const readPorts = (root) => JSON.parse(readFileSync(join(root, "widget", ".salga
 
 test("cli: allocation writes all four explicit numbers into ports.json and the scaffold literals", () => {
   const fix = miniCodeRoot();
-  const result = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 0, result.stderr);
   const ports = readPorts(fix.root);
   assert.deepEqual(Object.keys(ports), ["api", "web", "mysql", "frontendDev"]);
@@ -693,7 +693,7 @@ test("cli: allocation writes all four explicit numbers into ports.json and the s
 
 test("cli: --base fills all four, and a role flag overrides its role", () => {
   const fix = miniCodeRoot();
-  const result = runCli(fix.root, createArgs(fix, ["--base", "8220", "--skip-check", "--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--base", "8220", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(readPorts(fix.root), { api: 8220, web: 8221, mysql: 8222, frontendDev: 8223 });
   assert.equal(readFileSync(join(fix.root, "widget", "backend", "port.txt"), "utf8"), "port 8220\n");
@@ -701,7 +701,7 @@ test("cli: --base fills all four, and a role flag overrides its role", () => {
   const overridden = miniCodeRoot();
   const mixed = runCli(
     overridden.root,
-    createArgs(overridden, ["--base", "8230", "--web-port", "9000", "--mysql-port", "9001", "--frontend-dev-port", "9002", "--skip-check", "--skip-guard"]),
+    createArgs(overridden, ["--base", "8230", "--web-port", "9000", "--mysql-port", "9001", "--frontend-dev-port", "9002", "--skip-check", "--skip-guard", "--skip-vendor"]),
   );
   assert.equal(mixed.status, 0, mixed.stderr);
   assert.deepEqual(readPorts(overridden.root), { api: 8230, web: 9000, mysql: 9001, frontendDev: 9002 });
@@ -709,37 +709,37 @@ test("cli: --base fills all four, and a role flag overrides its role", () => {
 
 test("cli: --port stays the API port and the rest of its block follows", () => {
   const fix = miniCodeRoot();
-  const result = runCli(fix.root, createArgs(fix, ["--port", "8210", "--skip-check", "--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--port", "8210", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(readPorts(fix.root), { api: 8210, web: 8211, mysql: 8212, frontendDev: 8213 });
 });
 
 test("cli: a later lane adopts ports.json and a contradictory explicit number refuses", () => {
   const fix = miniCodeRoot();
-  assert.equal(runCli(fix.root, createArgs(fix, ["--base", "8240", "--skip-check", "--skip-guard"])).status, 0);
-  const adopted = runCli(fix.root, createArgs(fix, ["--lane", "frontend", "--force", "--skip-check", "--skip-guard"]));
+  assert.equal(runCli(fix.root, createArgs(fix, ["--base", "8240", "--skip-check", "--skip-guard", "--skip-vendor"])).status, 0);
+  const adopted = runCli(fix.root, createArgs(fix, ["--lane", "frontend", "--force", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(adopted.status, 0, adopted.stderr);
   assert.deepEqual(readPorts(fix.root), { api: 8240, web: 8241, mysql: 8242, frontendDev: 8243 });
   assert.equal(readFileSync(join(fix.root, "widget", "frontend", "port.txt"), "utf8"), "port 8240\n");
 
-  const refused = runCli(fix.root, createArgs(fix, ["--lane", "frontend", "--force", "--mysql-port", "9000", "--skip-check", "--skip-guard"]));
+  const refused = runCli(fix.root, createArgs(fix, ["--lane", "frontend", "--force", "--mysql-port", "9000", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(refused.status, 2);
   assert.match(refused.stderr, /contradicts/);
   assert.match(refused.stderr, /ports\.json/);
 
-  const matched = runCli(fix.root, createArgs(fix, ["--lane", "frontend", "--force", "--port", "8240", "--skip-check", "--skip-guard"]));
+  const matched = runCli(fix.root, createArgs(fix, ["--lane", "frontend", "--force", "--port", "8240", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(matched.status, 0, matched.stderr);
 });
 
 test("cli: --force never reallocates an already-recorded block", () => {
   const fix = miniCodeRoot();
-  assert.equal(runCli(fix.root, createArgs(fix, ["--base", "8100", "--skip-check", "--skip-guard"])).status, 0);
+  assert.equal(runCli(fix.root, createArgs(fix, ["--base", "8100", "--skip-check", "--skip-guard", "--skip-vendor"])).status, 0);
   // The block is now committed by a sibling, so a fresh allocation would have to move up.
   const other = join(fix.root, "other");
   mkdirSync(other, { recursive: true });
   writeFileSync(join(other, "occupancy.txt"), "occupied: 8100 8101 8102 8103\n");
   initGit(other);
-  const forced = runCli(fix.root, createArgs(fix, ["--force", "--skip-check", "--skip-guard"]));
+  const forced = runCli(fix.root, createArgs(fix, ["--force", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(forced.status, 0, forced.stderr);
   assert.deepEqual(readPorts(fix.root), { api: 8100, web: 8101, mysql: 8102, frontendDev: 8103 });
 });
@@ -747,7 +747,7 @@ test("cli: --force never reallocates an already-recorded block", () => {
 test("cli: exhaustion aborts naming the range, the blocks in use and the override flags", () => {
   const all = Array.from({ length: 200 }, (_, index) => 8100 + index).join(" ");
   const fix = miniCodeRoot({ siblings: { other: `occupancy: ${all}\n` } });
-  const result = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 1);
   assert.match(result.stderr, /8100.{0,4}8299/);
   assert.match(result.stderr, /8100, 8110/);
@@ -758,7 +758,7 @@ test("cli: exhaustion aborts naming the range, the blocks in use and the overrid
 
 test("cli: an explicit number overlapping a committed block warns and proceeds", () => {
   const fix = miniCodeRoot({ siblings: { other: "occupancy: 8100 8101 8102 8103\n" } });
-  const result = runCli(fix.root, createArgs(fix, ["--port", "8100", "--skip-check", "--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--port", "8100", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 0, result.stderr);
   assert.match(`${result.stdout}${result.stderr}`, /8100/);
   assert.match(`${result.stdout}${result.stderr}`, /overlap/i);
@@ -785,7 +785,7 @@ instantiate:
 `,
     files: { "conn.txt": "jdbc:mysql://localhost:3306/template\n" },
   });
-  const result = runCli(fix.root, createArgs(fix, ["--db", "widget_db", "--mysql-port", "8112", "--skip-check", "--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--db", "widget_db", "--mysql-port", "8112", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     readFileSync(join(fix.root, "widget", "backend", "conn.txt"), "utf8"),
@@ -809,7 +809,7 @@ instantiate:
 `,
     files: { "conn.txt": "3306\n" },
   });
-  const result = runCli(fix.root, createArgs(fix, ["--mysql-port", "abc", "--skip-check", "--skip-guard"]));
+  const result = runCli(fix.root, createArgs(fix, ["--mysql-port", "abc", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 2);
   assert.match(result.stderr, /--mysql-port must be a number/);
 });
@@ -820,6 +820,34 @@ test("cli: installs the master guard through salgadinhos' installer after the co
   const result = runCli(fix.root, createArgs(fix, ["--skip-check"]));
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(join(fix.root, "salgadinhos", "ran.txt"), "utf8"), `--install-repo ${join(fix.root, "widget")}`);
+});
+
+test("cli: vendors the worktree sweep before the first commit with no uncommitted copy", () => {
+  const vendor = [
+    'import { mkdirSync, writeFileSync } from "node:fs";',
+    'import { dirname, join } from "node:path";',
+    "const args = process.argv.slice(2);",
+    'const at = args.indexOf("--vendor-sweep");',
+    "if (at !== -1) {",
+    "  const root = args[at + 1];",
+    '  const files = { "tools/worktree-sweep.mjs": "// sweep\\n", "tools/worktree-sweep.test.mjs": "// test\\n" };',
+    "  for (const [rel, body] of Object.entries(files)) {",
+    "    const path = join(root, rel);",
+    "    mkdirSync(dirname(path), { recursive: true });",
+    "    writeFileSync(path, body);",
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  const fix = miniCodeRoot({ installer: vendor });
+  const result = runCli(fix.root, createArgs(fix, ["--skip-check"]));
+  assert.equal(result.status, 0, result.stderr);
+  const project = join(fix.root, "widget");
+  const tracked = git(project, ["ls-tree", "-r", "--name-only", "HEAD"]).split("\n");
+  assert.ok(tracked.includes("tools/worktree-sweep.mjs"), "the sweep module lands in the first commit");
+  assert.ok(tracked.includes("tools/worktree-sweep.test.mjs"), "its planner test lands in the first commit");
+  assert.equal(git(project, ["rev-list", "--count", "HEAD"]), "1", "everything lands in the one bootstrap commit");
+  assert.equal(git(project, ["status", "--porcelain"]), "", "no vendored copy is left uncommitted");
 });
 
 // ---------------------------------------------------------------------------
@@ -965,7 +993,7 @@ test("committed manifests: every declared literal exists in the file it names", 
 
 test("real scaffold: kotlin creates a renamed lane with the manifest copy and the sentinel", () => {
   const root = realCodeRoot();
-  const result = runCli(root, ["--code-root", root, "--stack", "kotlin", "--name", "widget", "--skip-check", "--skip-guard"]);
+  const result = runCli(root, ["--code-root", root, "--stack", "kotlin", "--name", "widget", "--skip-check", "--skip-guard", "--skip-vendor"]);
   assert.equal(result.status, 0, result.stderr);
   const lane = join(root, "widget", "backend");
   assertCreatedDocs(lane, "widget");
@@ -992,7 +1020,7 @@ test("real scaffold: kotlin creates a renamed lane with the manifest copy and th
 
 test("real scaffold: python creates a renamed lane", () => {
   const root = realCodeRoot();
-  const result = runCli(root, ["--code-root", root, "--stack", "python", "--name", "widget", "--skip-check", "--skip-guard"]);
+  const result = runCli(root, ["--code-root", root, "--stack", "python", "--name", "widget", "--skip-check", "--skip-guard", "--skip-vendor"]);
   assert.equal(result.status, 0, result.stderr);
   const lane = join(root, "widget", "backend");
   assertCreatedDocs(lane, "widget");
@@ -1008,7 +1036,7 @@ test("real scaffold: python creates a renamed lane", () => {
 
 test("real scaffold: react creates a renamed lane with scoped dependency metadata and the sandbox install pointer", () => {
   const root = realCodeRoot();
-  const result = runCli(root, ["--code-root", root, "--stack", "react", "--name", "widget", "--skip-check", "--skip-guard"]);
+  const result = runCli(root, ["--code-root", root, "--stack", "react", "--name", "widget", "--skip-check", "--skip-guard", "--skip-vendor"]);
   assert.equal(result.status, 0, result.stderr);
   const lane = join(root, "widget", "frontend");
   assertCreatedDocs(lane, "widget");
@@ -1035,7 +1063,7 @@ test("real scaffold: kotlin takes --port and --mysql-port into every host-side l
   const root = realCodeRoot();
   const result = runCli(root, [
     "--code-root", root, "--stack", "kotlin", "--name", "widget",
-    "--port", "8110", "--mysql-port", "8112", "--skip-check", "--skip-guard",
+    "--port", "8110", "--mysql-port", "8112", "--skip-check", "--skip-guard", "--skip-vendor",
   ]);
   assert.equal(result.status, 0, result.stderr);
   const lane = join(root, "widget", "backend");
@@ -1056,7 +1084,7 @@ test("real scaffold: python takes --port and --mysql-port into every host-side l
   const root = realCodeRoot();
   const result = runCli(root, [
     "--code-root", root, "--stack", "python", "--name", "widget",
-    "--port", "8130", "--mysql-port", "8132", "--skip-check", "--skip-guard",
+    "--port", "8130", "--mysql-port", "8132", "--skip-check", "--skip-guard", "--skip-vendor",
   ]);
   assert.equal(result.status, 0, result.stderr);
   const lane = join(root, "widget", "backend");
@@ -1077,7 +1105,7 @@ test("real scaffold: react takes --port and --frontend-dev-port into the Vite co
   const root = realCodeRoot();
   const result = runCli(root, [
     "--code-root", root, "--stack", "react", "--name", "widget",
-    "--port", "8110", "--frontend-dev-port", "8113", "--skip-check", "--skip-guard",
+    "--port", "8110", "--frontend-dev-port", "8113", "--skip-check", "--skip-guard", "--skip-vendor",
   ]);
   assert.equal(result.status, 0, result.stderr);
   const lane = join(root, "widget", "frontend");
