@@ -41,7 +41,8 @@ entries:
   tests/unit/test_architecture.py: judgment
   tests/fixtures.py: judgment
   tests/integration/test_telemetry_db.py: judgment
-  # A lane's image and deploy bits are its own (access-log flag, stopwaitsecs, ports).
+  # The backend build-stage fragment a project's root image composes (creation-only, the resolved
+  # venv); a stack build change here is a porting judgment, never a mechanical overwrite.
   Dockerfile: judgment
   pyproject.toml:
     class: merge
@@ -62,15 +63,18 @@ check:
 
 # Word-boundary token the scaffold uses as its own name; the creation tooling replaces it with
 # the project name (covers `src/template/`, pyproject `name`/`packages`/`root_package`, the
-# uvicorn target, Dockerfile and CI). template-check reuses it to normalize scaffold files
-# against a project.
+# uvicorn target and CI). template-check reuses it to normalize scaffold files against a project.
 #
 # `instantiate` is also the creation contract read by tools/new-project.mjs: the lane dir, the
-# fast check, the files where the token is legitimately part of the scaffold (not a placeholder),
-# and the convention values with their per-file literals for CLI overrides.
+# fast check, the creation-only build-stage fragment, the files where the token is legitimately
+# part of the scaffold (not a placeholder), and the convention values with their per-file literals
+# for CLI overrides.
 instantiate:
   name: template
   lane: backend
+  # The backend build-stage fragment: creation keeps it out of the lane (the project's root image
+  # composes it), so the lane never carries a competing build.
+  dockerfile: Dockerfile
   check: uv run poe check
   values:
     db:

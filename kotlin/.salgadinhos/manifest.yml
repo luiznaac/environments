@@ -8,6 +8,9 @@ entries:
   # A lane's compose diverges structurally (extra services, volumes, deploy bits); a scaffold
   # change here is a porting judgment, never an overwrite.
   docker-compose.yml: judgment
+  # The backend build-stage fragment a project's root image composes (creation-only); a stack
+  # build change here is a porting judgment, never a mechanical overwrite.
+  Dockerfile: judgment
   .pre-commit-config.yaml: judgment
   # A lane rewrites the guide for its project; a scaffold change here is a porting judgment.
   AGENTS.md: judgment
@@ -96,6 +99,9 @@ check:
 instantiate:
   name: template
   lane: backend
+  # The backend build-stage fragment: creation keeps it out of the lane (the project's root image
+  # composes it), so the lane never carries a competing build.
+  dockerfile: Dockerfile
   # `clean build` includes the Docker-backed integration suite, like CI.
   check: ./gradlew clean build
   keep:
