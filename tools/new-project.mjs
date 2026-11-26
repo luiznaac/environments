@@ -21,7 +21,7 @@
 //   node tools/new-project.mjs --stack <stack> --name <project> [--lane <dir>] [--to <dir>]
 //       [--db <name>] [--port <n>] [--web-port <n>] [--mysql-port <n>]
 //       [--frontend-dev-port <n>] [--base <n>] [--image <repo/name>] [--base-path </path/>]
-//       [--code-root <dir>] [--skip-check] [--skip-guard] [--force]
+//       [--code-root <dir>] [--skip-check] [--skip-vendor] [--skip-guard] [--force]
 
 import {
   chmodSync,
@@ -664,6 +664,7 @@ export function createProject({
   ports = {},
   base = null,
   skipCheck = false,
+  skipVendor = false,
   skipGuard = false,
   force = false,
   log = console.log,
@@ -745,6 +746,16 @@ export function createProject({
     if (result.error || result.status !== 0) throw new CreationError(`fast check failed: ${command}\n  (left for inspection at ${projectRoot})`);
   }
 
+  const installer = join(codeRoot, "salgadinhos", "adapters", "install.mjs");
+
+  // The worktree sweep is vendored before `git init`, so both copied files land in the bootstrap
+  // commit instead of being left as an uncommitted copy by the post-commit guard provisioning.
+  if (!skipVendor) {
+    if (!existsSync(installer)) throw new CreationError(`worktree sweep installer not found: ${installer} (pass --skip-vendor to skip it)`);
+    const result = spawnSync(process.execPath, [installer, "--vendor-sweep", projectRoot], { cwd: dirname(dirname(installer)), stdio: "inherit" });
+    if (result.error || result.status !== 0) throw new CreationError("worktree sweep vendoring failed (pass --skip-vendor to skip it)");
+  }
+
   requireGit(git(["init", "-q", "-b", "master"], projectRoot), "git init");
   requireGit(git(["add", "-A"], projectRoot), "git add");
   // A forced re-run over an identical lane stages nothing; that is success, not a failure.
@@ -757,13 +768,25 @@ export function createProject({
   }
 
   if (!skipGuard) {
-    const installer = join(codeRoot, "salgadinhos", "adapters", "install.mjs");
     if (!existsSync(installer)) throw new CreationError(`master guard installer not found: ${installer} (pass --skip-guard to skip it)`);
     const result = spawnSync(process.execPath, [installer, "--install-repo", projectRoot], { cwd: dirname(dirname(installer)), stdio: "inherit" });
     if (result.error || result.status !== 0) throw new CreationError("master guard installation failed (pass --skip-guard to skip it)");
   }
 
-  return { projectRoot, laneDir, laneAbs, sentinelPath, scaffoldSha, appliedValues, ports: chosenPorts, check, topics: manifest.topics, skippedCheck: skipCheck || !check, skippedGuard: skipGuard };
+  return {
+    projectRoot,
+    laneDir,
+    laneAbs,
+    sentinelPath,
+    scaffoldSha,
+    appliedValues,
+    ports: chosenPorts,
+    check,
+    topics: manifest.topics,
+    skippedCheck: skipCheck || !check,
+    skippedVendor: skipVendor,
+    skippedGuard: skipGuard,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -786,6 +809,7 @@ const USAGE = `usage: node tools/new-project.mjs --stack <stack> --name <project
   --image <repo/name> override the published image
   --base-path </p/>   override the SPA base path
   --skip-check        do not run the scaffold's fast check
+  --skip-vendor       do not vendor the worktree sweep into the project
   --skip-guard        do not install the master guard
   --force             create into an existing non-empty directory (never reallocates)
   --help              show this message`;
@@ -801,6 +825,7 @@ export function parseArgs(argv) {
     ports: {},
     base: null,
     skipCheck: false,
+    skipVendor: false,
     skipGuard: false,
     force: false,
     help: false,
@@ -825,6 +850,7 @@ export function parseArgs(argv) {
     else if (flag === "--image") args.overrides.image = value();
     else if (flag === "--base-path") args.overrides.basePath = value();
     else if (flag === "--skip-check") args.skipCheck = true;
+    else if (flag === "--skip-vendor") args.skipVendor = true;
     else if (flag === "--skip-guard") args.skipGuard = true;
     else if (flag === "--force") args.force = true;
     else if (flag === "--help" || flag === "-h") args.help = true;
@@ -854,6 +880,7 @@ function main(argv) {
     console.log(`[new-project]   overrides: ${result.appliedValues.length > 0 ? result.appliedValues.join(", ") : "none"}`);
     console.log(`[new-project]   stack topics: ${result.topics.length > 0 ? result.topics.join(", ") : "none declared"}`);
     console.log(`[new-project]   fast check: ${result.skippedCheck ? "skipped" : result.check}`);
+    console.log(`[new-project]   worktree sweep: ${result.skippedVendor ? "skipped" : "vendored into the bootstrap commit"}`);
     console.log(`[new-project]   master guard: ${result.skippedGuard ? "skipped" : "installed"}`);
     console.log("[new-project] next: remote repo, CI, secrets, domain and first deploy — the creation skill drives them");
   } catch (error) {
