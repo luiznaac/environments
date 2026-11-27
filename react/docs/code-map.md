@@ -28,8 +28,8 @@ Module → key files → seam index, plus the app entry points; seeded from the 
 
 ### Repo root — build, theme, proxy, CI
 **Purpose**: the Vite/Biome/TypeScript toolchain, the theme tokens and the dev-server wiring.
-**Files**: `vite.config.ts`, `vitest.config.ts`, `biome.json`, `tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`; `src/index.css`; `index.html`; `package.json`; `.env.example`; `.github/workflows/ci.yml`
-**Seam(s)**: `vite.config.ts` owns the production `base` path and, via `loadEnv`, the dev server's port (`FRONTEND_DEV_PORT`, default `5273`, strict) and `/api` proxy (`VITE_API_TARGET`, default `http://localhost:8080`); `src/index.css`'s `@theme` block is the token source (no `tailwind.config.js`); `package.json`'s `check` script (typecheck + Biome + Vitest) is the fast gate, mirrored by CI.
+**Files**: `vite.config.ts`, `vitest.config.ts`, `biome.json`, `tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`; `Dockerfile`; `src/index.css`; `index.html`; `package.json`; `.env.example`; `.github/workflows/ci.yml`
+**Seam(s)**: `vite.config.ts` owns the production `base` path and, via `loadEnv`, the dev server's port (`FRONTEND_DEV_PORT`, default `5273`, strict) and `/api` proxy (`VITE_API_TARGET`, default `http://localhost:8080`); `Dockerfile` is the creation-only frontend build-stage fragment (`npm run build` → `/fe/dist`) that a project's root image composes and creation keeps out of the lane; `src/index.css`'s `@theme` block is the token source (no `tailwind.config.js`); `package.json`'s `check` script (typecheck + Biome + Vitest) is the fast gate, mirrored by CI.
 
 ## Entry points
 

@@ -457,6 +457,7 @@ function parseInstantiate(raw, manifestPath) {
     name: instantiateString(source.name, manifestPath, "name"),
     lane: instantiateString(source.lane, manifestPath, "lane"),
     check: instantiateString(source.check, manifestPath, "check"),
+    dockerfile: instantiateString(source.dockerfile, manifestPath, "dockerfile"),
     keep,
     values: parseInstantiateValues(source.values, manifestPath),
   };

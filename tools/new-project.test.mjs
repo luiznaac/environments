@@ -86,7 +86,19 @@ instantiate:
 test("loadManifest: instantiate defaults to nulls and empty lists when absent", () => {
   const path = manifest("entries:\n  biome.json: owned\ninstantiate:\n  name: template\n");
   const { instantiate } = loadManifest(path);
-  assert.deepEqual(instantiate, { name: "template", lane: null, check: null, keep: [], values: {} });
+  assert.deepEqual(instantiate, { name: "template", lane: null, check: null, dockerfile: null, keep: [], values: {} });
+});
+
+test("loadManifest: reads instantiate.dockerfile as the creation-only fragment path", () => {
+  const path = manifest(`
+entries:
+  Dockerfile: judgment
+instantiate:
+  name: template
+  lane: backend
+  dockerfile: Dockerfile
+`);
+  assert.equal(loadManifest(path).instantiate.dockerfile, "Dockerfile");
 });
 
 test("loadManifest: value defaults and styles are kept as declared", () => {
@@ -116,13 +128,14 @@ instantiate:
 test("loadManifest: php-style instantiate with only a null name still loads", () => {
   const path = manifest("entries: {}\ninstantiate:\n  name: null\n  lane: null\n");
   const { instantiate } = loadManifest(path);
-  assert.deepEqual(instantiate, { name: null, lane: null, check: null, keep: [], values: {} });
+  assert.deepEqual(instantiate, { name: null, lane: null, check: null, dockerfile: null, keep: [], values: {} });
 });
 
 test("loadManifest: malformed instantiate fields are config errors", () => {
   const cases = [
     ["lane: [a]", /'instantiate\.lane' must be a string/],
     ["check:\n    - x", /'instantiate\.check' must be a string/],
+    ["dockerfile: [a]", /'instantiate\.dockerfile' must be a string/],
     ["keep:\n    key: value", /'instantiate\.keep' must be a list/],
     ["keep:\n    - key: value", /'instantiate\.keep' must be a list of strings/],
     ["values: [a]", /'instantiate\.values' must be a map/],
@@ -571,6 +584,25 @@ test("cli: creates the lane, renaming paths, contents and JSON package names", (
   assert.equal(pkg.dependencies["@babel/template"], "^7.29.7", "scoped dependency metadata is not a placeholder");
 });
 
+test("cli: a declared creation-only Dockerfile is not copied into the lane", () => {
+  const fix = miniCodeRoot({
+    manifest: `entries:\n  Dockerfile: judgment\ninstantiate:\n  name: template\n  lane: backend\n  dockerfile: Dockerfile\n`,
+    files: {
+      "Dockerfile": "FROM scratch AS backend\n",
+      "src/template/app.py": "package template.app\n",
+    },
+  });
+  const result = runCli(fix.root, createArgs(fix, ["--skip-check", "--skip-guard", "--skip-vendor"]));
+  assert.equal(result.status, 0, result.stderr);
+  const lane = join(fix.root, "widget", "backend");
+  assert.ok(existsSync(join(lane, "src", "widget", "app.py")), "ordinary scaffold files are still copied");
+  assert.ok(!existsSync(join(lane, "Dockerfile")), "the creation-only fragment stays out of the lane");
+  assert.ok(
+    !("Dockerfile" in loadManifest(join(lane, ".salgadinhos", "manifest.yml")).entries),
+    "the creation-only entry is dropped from the lane manifest",
+  );
+});
+
 test("cli: keeps an executable file's mode in the created lane", () => {
   const fix = miniCodeRoot();
   const environments = join(fix.root, "environments");
@@ -588,7 +620,7 @@ test("cli: the project manifest keeps the entries and drops instantiate", () => 
   const copied = loadManifest(join(fix.root, "widget", "backend", ".salgadinhos", "manifest.yml"));
   const original = loadManifest(join(fix.root, "environments", "mini", ".salgadinhos", "manifest.yml"));
   assert.deepEqual(copied.entries, original.entries);
-  assert.deepEqual(copied.instantiate, { name: null, lane: null, check: null, keep: [], values: {} });
+  assert.deepEqual(copied.instantiate, { name: null, lane: null, check: null, dockerfile: null, keep: [], values: {} });
   assert.doesNotMatch(readFileSync(join(fix.root, "widget", "backend", ".salgadinhos", "manifest.yml"), "utf8"), /\btemplate\b/);
 });
 
@@ -871,6 +903,7 @@ test("committed manifests: the live scaffolds declare the creation data", () => 
   const kotlin = loadManifest(join(REPO_ROOT, "kotlin", ".salgadinhos", "manifest.yml")).instantiate;
   assert.equal(kotlin.lane, "backend");
   assert.equal(kotlin.check, "./gradlew clean build");
+  assert.equal(kotlin.dockerfile, "Dockerfile", "the creation-only fragment is declared");
   assert.deepEqual(kotlin.keep, [".salgadinhos/manifest.yml", "config/detekt/config.yml", "gradlew", "gradlew.bat"]);
   assert.deepEqual(Object.keys(kotlin.values).sort(), ["db", "image", "mysqlPort", "port"]);
   assert.deepEqual(kotlin.values.db.replacements[".env.example"], ["MYSQL_DATABASE=template"]);
@@ -881,6 +914,7 @@ test("committed manifests: the live scaffolds declare the creation data", () => 
   const python = loadManifest(join(REPO_ROOT, "python", ".salgadinhos", "manifest.yml")).instantiate;
   assert.equal(python.lane, "backend");
   assert.equal(python.check, "uv run poe check");
+  assert.equal(python.dockerfile, "Dockerfile", "the creation-only fragment is declared");
   assert.deepEqual(python.keep, []);
   assert.deepEqual(Object.keys(python.values).sort(), ["db", "image", "mysqlPort", "port"]);
   assert.equal(python.values.port.default, "8080");
@@ -890,6 +924,7 @@ test("committed manifests: the live scaffolds declare the creation data", () => 
   const react = loadManifest(join(REPO_ROOT, "react", ".salgadinhos", "manifest.yml")).instantiate;
   assert.equal(react.lane, "frontend");
   assert.equal(react.check, "npm ci && npm run check");
+  assert.equal(react.dockerfile, "Dockerfile", "the creation-only fragment is declared");
   assert.deepEqual(react.keep, []);
   assert.deepEqual(Object.keys(react.values), ["port", "frontendDevPort", "basePath"]);
   assert.equal(react.values.port.default, "8080");
@@ -971,6 +1006,28 @@ test("committed manifests: compose and env files are judgment entries and stale 
   assert.ok(!("pyproject.toml" in python.values.port.replacements), "the stale pyproject --port literal is gone");
 });
 
+test("committed scaffolds: each stack ships a build-stage Dockerfile fragment classified as a judgment port", () => {
+  const fragments = {
+    kotlin: { stage: "backend", artifact: /:application:installDist/ },
+    python: { stage: "backend", artifact: /uv sync --frozen --no-dev/ },
+    react: { stage: "frontend", artifact: /npm run build/ },
+  };
+  for (const [stack, spec] of Object.entries(fragments)) {
+    const manifest = loadManifest(join(REPO_ROOT, stack, ".salgadinhos", "manifest.yml"));
+    assert.equal(
+      manifest.entries["Dockerfile"]?.class,
+      "judgment",
+      `${stack}: the Dockerfile fragment is a judgment port, never a mechanical overwrite`,
+    );
+    const dockerfile = readFileSync(join(REPO_ROOT, stack, "Dockerfile"), "utf8").replace(/\r\n/g, "\n");
+    assert.match(dockerfile, new RegExp(`^FROM .+ AS ${spec.stage}$`, "m"), `${stack}: declares the ${spec.stage} stage`);
+    assert.match(dockerfile, spec.artifact, `${stack}: the fragment produces its artifact`);
+  }
+  const python = readFileSync(join(REPO_ROOT, "python", "Dockerfile"), "utf8").replace(/\r\n/g, "\n");
+  assert.doesNotMatch(python, /^CMD\b/m, "python keeps no competing runtime: the fragment is build-only");
+  assert.doesNotMatch(python, /^FROM python:/m, "python keeps no competing runtime stage");
+});
+
 test("committed manifests: every declared literal exists in the file it names", () => {
   for (const stack of ["kotlin", "python", "react"]) {
     const { values } = loadManifest(join(REPO_ROOT, stack, ".salgadinhos", "manifest.yml")).instantiate;
@@ -1001,6 +1058,7 @@ test("real scaffold: kotlin creates a renamed lane with the manifest copy and th
   assert.match(readFileSync(join(lane, "build.gradle.kts"), "utf8"), /group = "dev\.agner\.widget"/);
   assert.match(readFileSync(join(lane, "docker-compose.yml"), "utf8"), /MYSQL_DATABASE=widget/);
   assert.match(readFileSync(join(lane, ".env.example"), "utf8"), /MYSQL_DATABASE=widget/);
+  assert.ok(!existsSync(join(lane, "Dockerfile")), "the creation-only backend fragment stays out of the lane");
   assert.ok(existsSync(join(lane, "usecase", "src", "main", "kotlin", "dev", "agner", "widget", "usecase", "commons", "CommonExtensions.kt")));
   assert.match(readFileSync(join(lane, "config", "detekt", "config.yml"), "utf8"), /licenseTemplateFile: 'license\.template'/, "keep files are untouched");
   assert.match(readFileSync(join(lane, "gradlew"), "utf8"), /Groovy template/, "keep files are untouched");
@@ -1009,10 +1067,12 @@ test("real scaffold: kotlin creates a renamed lane with the manifest copy and th
   }
   const scaffold = loadManifest(join(REPO_ROOT, "kotlin", ".salgadinhos", "manifest.yml"));
   const expectedEntries = Object.fromEntries(
-    Object.values(scaffold.entries).map((entry) => {
-      const file = laneSidePath(entry.file, scaffold.instantiate.name, "widget");
-      return [file, { ...entry, file }];
-    }),
+    Object.values(scaffold.entries)
+      .filter((entry) => entry.file !== scaffold.instantiate.dockerfile)
+      .map((entry) => {
+        const file = laneSidePath(entry.file, scaffold.instantiate.name, "widget");
+        return [file, { ...entry, file }];
+      }),
   );
   assert.deepEqual(loadManifest(join(lane, ".salgadinhos", "manifest.yml")).entries, expectedEntries);
   assert.equal(readFileSync(join(root, "widget", ".salgadinhos", "backend.yml"), "utf8").includes("source: kotlin"), true);
@@ -1031,7 +1091,7 @@ test("real scaffold: python creates a renamed lane", () => {
   assert.match(pyproject, /root_package = "widget"/);
   assert.match(readFileSync(join(lane, "uv.lock"), "utf8"), /^name = "widget"$/m);
   assert.match(readFileSync(join(lane, ".env.example"), "utf8"), /MYSQL__DATABASE=widget/);
-  assert.match(readFileSync(join(lane, "Dockerfile"), "utf8"), /uvicorn", "widget\.application\.boot:app"/);
+  assert.ok(!existsSync(join(lane, "Dockerfile")), "the creation-only backend fragment stays out of the lane");
 });
 
 test("real scaffold: react creates a renamed lane with scoped dependency metadata and the sandbox install pointer", () => {
@@ -1044,6 +1104,7 @@ test("real scaffold: react creates a renamed lane with scoped dependency metadat
   assert.equal(JSON.parse(readFileSync(join(lane, "package-lock.json"), "utf8")).name, "widget-fe");
   assert.match(readFileSync(join(lane, "package-lock.json"), "utf8"), /"@babel\/template"/);
   assert.match(readFileSync(join(lane, "vite.config.ts"), "utf8"), /"\/widget\/"/);
+  assert.ok(!existsSync(join(lane, "Dockerfile")), "the creation-only frontend fragment stays out of the lane");
   const ports = JSON.parse(readFileSync(join(root, "widget", ".salgadinhos", "ports.json"), "utf8"));
   const env = readFileSync(join(lane, ".env.example"), "utf8");
   assert.match(env, new RegExp(`VITE_API_TARGET=http://localhost:${ports.api}`));

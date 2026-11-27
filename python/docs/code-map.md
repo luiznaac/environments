@@ -60,11 +60,11 @@ The layers are one package, `src/template/`, with one sub-package each; `import-
 ### Repo root — packaging, deploy, CI
 **Purpose**: the toolchain, configuration and container story around the package.
 **Files**: `pyproject.toml`; `Dockerfile`, `docker-compose.yml`, `.env.example`; `mysql/init.sql`; `.pre-commit-config.yaml`; `.github/workflows/{ci,docker-publish}.yml`
-**Seam(s)**: `pyproject.toml` carries every tool's config and the `poe` task graph — `poe check` (lint, format-check, typecheck, contracts, unit tests) is the verification ladder's fast rung, and its `import-linter` contracts are the layer gate. `docker-compose.yml` provides the MySQL dependency; `mysql/init.sql` is the schema bootstrap mounted by it. `.pre-commit-config.yaml` runs the branch guard plus the unit lane.
+**Seam(s)**: `pyproject.toml` carries every tool's config and the `poe` task graph — `poe check` (lint, format-check, typecheck, contracts, unit tests) is the verification ladder's fast rung, and its `import-linter` contracts are the layer gate. `docker-compose.yml` provides the MySQL dependency; `mysql/init.sql` is the schema bootstrap mounted by it. `Dockerfile` is the creation-only backend build-stage fragment (uv resolves the venv) that a project's root image composes and creation keeps out of the lane. `.pre-commit-config.yaml` runs the branch guard plus the unit lane.
 
 ## Entry points
 
 - `src/template/application/boot.py` — the process: `app` is what uvicorn imports, `main()` runs uvicorn on `HTTP_PORT`; both build the `Container`.
 - `src/template/httpapi/configuration/server.py` — `build_app` mounts the controllers and installs the exception handlers.
 - `tests/integration/conftest.py` — the integration lane's entry: Testcontainers MySQL plus the real app over ASGI.
-- `Dockerfile` + `docker-compose.yml` — the container entry: uvicorn serves `template.application.boot:app`, with the MySQL sidecar.
+- `Dockerfile` + `docker-compose.yml` — the container story: the `Dockerfile` is the creation-only backend build-stage fragment (the resolved venv) that a project's root image composes, and `docker-compose.yml` provides the MySQL sidecar for local runs.

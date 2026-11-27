@@ -7,11 +7,12 @@
 //
 // The mechanical contract is entirely manifest data: `instantiate.name` is the token renamed to
 // the project name (word-bounded in text and paths, package-name-shaped in JSON values),
-// `instantiate.lane` the default lane dir, `check` the fast check, `keep` the files where the
-// token is not a placeholder, and `values` the convention overrides (`db`, `port`, `mysqlPort`,
-// `frontendDevPort`, `image`, `basePath`) as file-scoped literal swaps. A port role's literal may
-// carry `{{value}}` (the role's computed number); the port roles run before the other values and
-// every value runs before the name token.
+// `instantiate.lane` the default lane dir, `check` the fast check, `dockerfile` the creation-only
+// build-stage fragment (composed into the project's root image, never copied into the lane),
+// `keep` the files where the token is not a placeholder, and `values` the convention overrides
+// (`db`, `port`, `mysqlPort`, `frontendDevPort`, `image`, `basePath`) as file-scoped literal swaps.
+// A port role's literal may carry `{{value}}` (the role's computed number); the port roles run
+// before the other values and every value runs before the name token.
 //
 // Creation also owns a project's port block: the lowest fully free 10-port base in 8100–8299,
 // with occupancy read from family-repo literals, live listeners and `docker ps`, committed to
@@ -211,8 +212,9 @@ const yamlScalar = (value) =>
 
 // The project's copy of the manifest is the classification only: `entries` is what the propagation
 // flow watches; the creation-only `instantiate:` section does not belong in a project, and the
-// lineage lives in the lane sentinel.
-export function rewriteProjectManifest({ entries, token = null, name = null }) {
+// lineage lives in the lane sentinel. A creation-only path (the Dockerfile fragment) never reaches
+// the lane, so its entry is dropped rather than left dangling.
+export function rewriteProjectManifest({ entries, token = null, name = null, exclude = [] }) {
   const lines = [
     "# Propagation manifest copied at creation from the scaffold's manifest: `entries` maps each",
     "# watched path to owned | pinned | merge | judgment. The lane's lineage (source, applied,",
@@ -220,6 +222,7 @@ export function rewriteProjectManifest({ entries, token = null, name = null }) {
     "entries:",
   ];
   for (const entry of Object.values(entries)) {
+    if (exclude.includes(entry.file)) continue;
     const fields = { ...entry };
     delete fields.file;
     const keys = Object.keys(fields);
@@ -677,7 +680,7 @@ export function createProject({
     throw new ConfigError(`no scaffold manifest at ${manifestPath} — is '${stack}' a scaffold in ${environmentsPath}?`);
   }
   const manifest = loadManifest(manifestPath);
-  const { name: token, lane: manifestLane, check, keep, values } = manifest.instantiate;
+  const { name: token, lane: manifestLane, check, dockerfile: dockerfileFragment, keep, values } = manifest.instantiate;
   if (!token) {
     throw new ConfigError(`stack '${stack}' declares no instantiate.name — creation is deferred for this scaffold`);
   }
@@ -719,12 +722,15 @@ export function createProject({
 
   const laneAbs = join(projectRoot, laneDir);
   copyTree(join(environmentsPath, stack), laneAbs, scaffoldModes(environmentsPath, stack, scaffoldSha));
+  // The stack's build-stage fragment is creation-only: a project's root image composes it, so it
+  // never lands in the lane as a competing build.
+  if (dockerfileFragment) rmSync(join(laneAbs, dockerfileFragment), { force: true });
   const appliedValues = applyValueOverrides(laneAbs, { token, values, overrides: { ...portOverrides, ...overrides } });
   renameTokenPaths(laneAbs, token, name);
   rewriteTokenContents(laneAbs, { token, name, keep });
   writeFileSync(
     join(laneAbs, ".salgadinhos", "manifest.yml"),
-    rewriteProjectManifest({ entries: manifest.entries, token, name }),
+    rewriteProjectManifest({ entries: manifest.entries, token, name, exclude: dockerfileFragment ? [dockerfileFragment] : [] }),
     "utf8",
   );
 

@@ -119,7 +119,7 @@ Only `api` and `mysql` apply to this scaffold; `web` and `frontend-dev` belong t
 
 | Role | Host env key | Scaffold default | Container-internal |
 |---|---|---|---|
-| `api` | `HTTP_PORT` | `8080` | `8080` (uvicorn, `Dockerfile` `EXPOSE`) |
+| `api` | `HTTP_PORT` | `8080` | `8080` (uvicorn) |
 | `web` | `WEB_HOST_PORT` (generated root compose only) | `8081` | `8081` |
 | `mysql` | `MYSQL__PORT` | `3306` | `3306` |
 | `frontend-dev` | `FRONTEND_DEV_PORT` (react / generated `frontend/`) | `5273` | — |
@@ -135,10 +135,10 @@ uv run poe test       # all tests (integration needs Docker)
 
 Local dev: `docker compose up -d mysql` starts MySQL on host `3306` (or `$MYSQL__PORT`), then `uv run poe run` serves the API on `$HTTP_PORT` (default `8080`, reload in `dev`). `MYSQL__HOST`/`MYSQL__USER`/`MYSQL__PASSWORD`/`MYSQL__DATABASE` default in `settings.py`; a gitignored `.env` overrides them.
 
-Telemetry deploy: uvicorn runs with `--no-access-log` (metrics own per-request volume), and the process sets supervisord `stopwaitsecs=20` so the 10 s SDK flush on `Container.aclose()` completes. The Collector is infra-owned and is **not** shipped here; the prod deploy waits on the host Collector and the per-service env ticket. `TELEMETRY_CONSOLE=true` is the offline dev switch.
+Telemetry deploy: in a project's composed image, uvicorn runs with `--no-access-log` (metrics own per-request volume), and the process sets supervisord `stopwaitsecs=20` so the 10 s SDK flush on `Container.aclose()` completes. The Collector is infra-owned and is **not** shipped here; the prod deploy waits on the host Collector and the per-service env ticket. `TELEMETRY_CONSOLE=true` is the offline dev switch.
 
 Git/PR conventions: see `salgadinhos/global/AGENTS.md`.
 
 ## Instantiation
 
-New projects are instantiated from this scaffold by the `new-project` script in `environments` — it applies the `template` renames (package dir, pyproject, import-linter, Dockerfile, CI, DB name) from the manifest's `instantiate:` section, stamps the lane sentinel and makes the first commit; the creation skill in `salgadinhos` drives the parameters and the follow-up. Don't rename by hand.
+New projects are instantiated from this scaffold by the `new-project` script in `environments` — it applies the `template` renames (package dir, pyproject, import-linter, CI, DB name) from the manifest's `instantiate:` section, stamps the lane sentinel and makes the first commit; the creation skill in `salgadinhos` drives the parameters and the follow-up. Don't rename by hand.
