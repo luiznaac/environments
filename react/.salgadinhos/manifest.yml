@@ -56,6 +56,13 @@ instantiate:
   # The frontend build-stage fragment: creation keeps it out of the lane (the project's root image
   # composes it), so the lane never carries a competing build.
   dockerfile: Dockerfile
+  # How the built SPA is served in a frontend-only root image. A paired image (backend + react)
+  # instead copies these files onto the backend's base and adds nginx, so this base is unused there.
+  runtime:
+    base: nginx:1.27-alpine
+    copy:
+      - "/fe/dist /usr/share/nginx/html"
+    port: "80"
   check: npm ci && npm run check
   values:
     port:

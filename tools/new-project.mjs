@@ -9,10 +9,13 @@
 // the project name (word-bounded in text and paths, package-name-shaped in JSON values),
 // `instantiate.lane` the default lane dir, `check` the fast check, `dockerfile` the creation-only
 // build-stage fragment (composed into the project's root image, never copied into the lane),
+// `runtime` how that artifact runs in the root image (base, COPY operands, command, port and the
+// env var that pins it),
 // `keep` the files where the token is not a placeholder, and `values` the convention overrides
-// (`db`, `port`, `mysqlPort`, `frontendDevPort`, `image`, `basePath`) as file-scoped literal swaps.
-// A port role's literal may carry `{{value}}` (the role's computed number); the port roles run
-// before the other values and every value runs before the name token.
+// (`db`, `port`, `mysqlPort`, `frontendDevPort`, `basePath`) as file-scoped literal swaps. The
+// project's image reference is not a lane value: `--image` rewrites it in the root publish workflow
+// (default `luiznaac/<project>`). A port role's literal may carry `{{value}}` (the role's computed
+// number); the port roles run before the other values and every value runs before the name token.
 //
 // Creation also owns a project's port block: the lowest fully free 10-port base in 8100–8299,
 // with occupancy read from family-repo literals, live listeners and `docker ps`, committed to
@@ -45,6 +48,7 @@ import {
   applyPlaceholders,
   laneSidePath,
   loadManifest,
+  loadSentinel,
   modePermissions,
   resolveRoots,
 } from "./template-check.mjs";
@@ -157,14 +161,14 @@ export function findTokenLeftovers(rootDir, { token, keep = [] }) {
   return hits.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }
 
-// Convention values (`db`, `port`, `mysqlPort`, `frontendDevPort`, `image`, `basePath`) with an
-// override: swap the literals each value declares, in the files it declares them in. A literal may
-// carry `{{value}}`, replaced with the override while the rest of the literal stays as context
+// Convention values (`db`, `port`, `mysqlPort`, `frontendDevPort`, `basePath`) with an override:
+// swap the literals each value declares, in the files it declares them in. A literal may carry
+// `{{value}}`, replaced with the override while the rest of the literal stays as context
 // (`"{{value}}:3306"` -> `"8112:3306"`, `${MYSQL_PORT:-{{value}}}:3306` likewise). A literal
 // without it is replaced wholesale (`8080` -> the override), unless style `token` (default) means
 // the literal carries context around the token (`3306/template`, `MYSQL_DATABASE=template`) and
 // the token in it becomes the override, keeping the context; `whole` means the override is the
-// literal's full replacement (`luiznaac/template` -> the image reference). Called before the token
+// literal's full replacement (`/template/` -> the project's base path). Called before the token
 // pass, so paths still carry the token.
 //
 // The port roles, in block order: API first, then the rest. Their literals may carry
@@ -483,6 +487,193 @@ export const portsJsonText = (ports) =>
   `${JSON.stringify(Object.fromEntries(PORT_ROLES.map((role) => [role, ports[role]])), null, 2)}\n`;
 
 // ---------------------------------------------------------------------------
+// The root image: composition from the chosen stacks' fragments + a shared runtime
+// ---------------------------------------------------------------------------
+
+// The stack-agnostic root template copied into every project root: the tag-driven publish
+// workflow, the release script and the notes config, plus the deploy files a paired image needs.
+export const PROJECT_TEMPLATE = "project-template";
+
+// The stage a fragment declares (`FROM <image> AS <stage>`). The first FROM is the build stage;
+// the composition orders backend before frontend and names it in the runtime stage's COPYs.
+export function fragmentStageName(text) {
+  const match = String(text).match(/^FROM\s+\S+\s+AS\s+(\S+)\s*$/im);
+  return match ? match[1] : null;
+}
+
+// A fragment hardcodes its scaffold's default lane (`COPY backend/ ...`). When the lane is
+// overridden or the fragment belongs to an earlier lane, only the COPY operand paths are
+// rewritten — the stage name (which can share the word, e.g. `AS backend`) never is.
+function normalizeFragmentLane(text, defaultLane, actualLane) {
+  if (!defaultLane || defaultLane === actualLane) return text;
+  const prefix = new RegExp(`(^|\\s)${escapeRegex(defaultLane)}/`, "g");
+  return text
+    .split("\n")
+    .map((line) => (/^\s*COPY\b/i.test(line) ? line.replace(prefix, (_match, lead) => `${lead}${actualLane}/`) : line))
+    .join("\n");
+}
+
+const jsonArray = (values) => `[${values.map((value) => JSON.stringify(value)).join(", ")}]`;
+
+function requireRuntime(source) {
+  const runtime = source.manifest.instantiate.runtime;
+  if (!runtime) {
+    throw new ConfigError(
+      `scaffold '${source.source}' ships a '${source.stage}' build stage but declares no 'instantiate.runtime' — creation cannot compose its root image`,
+    );
+  }
+  return runtime;
+}
+
+// Pin the app's listen port to the image's canonical container port, so it does not inherit the
+// host-dev default a `--port` override writes into the application config.
+function emitPortEnv(lines, runtime) {
+  if (runtime.port && runtime.portEnv) lines.push(`ENV ${runtime.portEnv}=${runtime.port}`);
+}
+
+// A single-stack root image: pull the artifact out of the build stage into the stack's runtime
+// base. A backend runs its command; a frontend serves the copied files through a SPA-fallback
+// nginx site (so client-router deep links resolve).
+function singleRuntime(source) {
+  const runtime = requireRuntime(source);
+  const lines = [`FROM ${runtime.base} AS runtime`];
+  if (runtime.workdir) lines.push(`WORKDIR ${runtime.workdir}`);
+  for (const copy of runtime.copy) lines.push(`COPY --from=${source.stage} ${copy}`);
+  if (source.stage === "frontend") lines.push("COPY deploy/spa.conf /etc/nginx/conf.d/default.conf");
+  if (runtime.port) lines.push(`EXPOSE ${runtime.port}`);
+  if (source.stage === "backend") {
+    if (!runtime.command) {
+      throw new ConfigError(`scaffold '${source.source}' is a backend but its 'instantiate.runtime' declares no 'command'`);
+    }
+    emitPortEnv(lines, runtime);
+    lines.push(`CMD ${jsonArray(["sh", "-c", runtime.command])}`);
+  }
+  return lines.join("\n");
+}
+
+// A paired root image: the backend's base carries both artifacts, nginx serves the SPA and proxies
+// /api to the backend, and a small entrypoint runs both. The deploy files come from the root
+// template and are copied into the project only when a pair is composed.
+function pairedRuntime(backend, frontend) {
+  const backendRuntime = requireRuntime(backend);
+  if (!backendRuntime.command) {
+    throw new ConfigError(`scaffold '${backend.source}' is a backend but its 'instantiate.runtime' declares no 'command'`);
+  }
+  const frontendRuntime = requireRuntime(frontend);
+  const lines = [`FROM ${backendRuntime.base} AS runtime`];
+  if (backendRuntime.systemPackages.length > 0) {
+    lines.push(
+      "RUN apt-get update \\",
+      `    && apt-get install -y --no-install-recommends ${backendRuntime.systemPackages.join(" ")} \\`,
+      "    && rm -rf /var/lib/apt/lists/* /etc/nginx/sites-enabled/default",
+    );
+  }
+  if (backendRuntime.workdir) lines.push(`WORKDIR ${backendRuntime.workdir}`);
+  for (const copy of backendRuntime.copy) lines.push(`COPY --from=${backend.stage} ${copy}`);
+  for (const copy of frontendRuntime.copy) lines.push(`COPY --from=${frontend.stage} ${copy}`);
+  lines.push("COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf");
+  lines.push("COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh");
+  emitPortEnv(lines, backendRuntime);
+  lines.push(`ENV APP_CMD=${JSON.stringify(backendRuntime.command)}`);
+  lines.push(`EXPOSE ${frontendRuntime.port ?? "80"} ${backendRuntime.port ?? "8080"}`);
+  lines.push('ENTRYPOINT ["sh", "/usr/local/bin/entrypoint.sh"]');
+  return lines.join("\n");
+}
+
+// The root Dockerfile: the header, each chosen stack's build-stage fragment (backend first, then
+// frontend), then the one runtime stage. `docker build .` builds the final `runtime` stage. A
+// project has at most one backend and one frontend lane.
+export function composeRootDockerfile({ sources }) {
+  const backends = sources.filter((source) => source.stage === "backend");
+  const frontends = sources.filter((source) => source.stage === "frontend");
+  const unknown = sources.filter((source) => source.stage !== "backend" && source.stage !== "frontend");
+  if (unknown.length > 0) {
+    throw new ConfigError(`a Dockerfile fragment declares an unknown stage '${unknown[0].stage}' (expected backend or frontend)`);
+  }
+  if (backends.length > 1) throw new ConfigError("a project can compose only one backend build stage");
+  if (frontends.length > 1) throw new ConfigError("a project can compose only one frontend build stage");
+  if (backends.length === 0 && frontends.length === 0) throw new ConfigError("no build stage to compose");
+
+  const backend = backends[0];
+  const frontend = frontends[0];
+  const pair = Boolean(backend && frontend);
+
+  const parts = [
+    "# syntax=docker/dockerfile:1",
+    "#",
+    "# Root image, composed at creation from each chosen stack's build-stage fragment plus one",
+    "# shared runtime stage. `docker build .` builds the final `runtime` stage. It is recomposed",
+    "# whenever creation adds a lane, so a hand edit here is replaced on the next lane creation —",
+    "# change the stack's fragment (or runtime) in environments instead.",
+    "",
+  ];
+  for (const source of [backend, frontend].filter(Boolean)) {
+    parts.push(`# ===== ${source.stage} build stage (${source.source}) =====`, source.fragment.trimEnd(), "");
+  }
+  parts.push("# ===== runtime stage =====", pair ? pairedRuntime(backend, frontend) : singleRuntime(backend ?? frontend), "");
+  return { text: parts.join("\n"), pair, frontend: Boolean(frontend) };
+}
+
+// The lane sources a project's root image composes: the lanes already stamped under
+// `.salgadinhos/` plus the lane this run creates. Later lanes complete the file rather than
+// overwrite it, because the whole set is recomposed every time.
+function laneSources(projectRoot) {
+  const dir = join(projectRoot, ".salgadinhos");
+  const lanes = new Map();
+  if (existsSync(dir)) {
+    for (const file of readdirSync(dir).filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))) {
+      let sentinel;
+      try {
+        sentinel = loadSentinel(join(dir, file));
+      } catch {
+        continue;
+      }
+      lanes.set(sentinel.lane, sentinel.source);
+    }
+  }
+  return lanes;
+}
+
+// Copy a root-template file into the project unless the project already owns it (a second lane
+// must not clobber a project-local edit). The publish workflow's image reference is rewritten
+// from the template token to the project's chosen image.
+function copyTemplateFile(templateDir, projectRoot, rel, { transform = (text) => text, mode = null } = {}) {
+  const from = join(templateDir, rel);
+  const to = join(projectRoot, rel);
+  if (!existsSync(from) || existsSync(to)) return false;
+  mkdirSync(dirname(to), { recursive: true });
+  const text = readText(from);
+  if (text === null) writeFileSync(to, readFileSync(from));
+  else writeFileSync(to, transform(text.replace(/\r\n/g, "\n")), "utf8");
+  if (mode !== null) chmodSync(to, mode);
+  return true;
+}
+
+// The image reference the root publish workflow carries: `luiznaac/<project>` by default, or the
+// `--image` override. The template's placeholder is `luiznaac/template`.
+export const imageReference = ({ name, override }) => override ?? `luiznaac/${name}`;
+
+function copyReleaseTemplate({ templateDir, projectRoot, image }) {
+  const files = [
+    [".github/workflows/docker-publish.yml", { transform: (text) => text.split("luiznaac/template").join(image) }],
+    [".github/release.yml", {}],
+    ["scripts/release.sh", { mode: 0o755 }],
+  ];
+  for (const [rel, options] of files) copyTemplateFile(templateDir, projectRoot, rel, options);
+}
+
+// Copy the deploy files the composed image references: a paired image needs the nginx site and
+// the two-process entrypoint; a frontend-only image needs the SPA-fallback site.
+function copyRuntimeDeploy({ templateDir, projectRoot, pair, frontend }) {
+  if (pair) {
+    copyTemplateFile(templateDir, projectRoot, "deploy/nginx.conf");
+    copyTemplateFile(templateDir, projectRoot, "deploy/entrypoint.sh", { mode: 0o755 });
+  } else if (frontend) {
+    copyTemplateFile(templateDir, projectRoot, "deploy/spa.conf");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Creation
 // ---------------------------------------------------------------------------
 
@@ -687,6 +878,9 @@ export function createProject({
   const laneDir = lane ?? manifestLane;
   if (!laneDir) throw new ConfigError(`stack '${stack}' declares no instantiate.lane — pass --lane <dir>`);
   for (const key of Object.keys(overrides)) {
+    // The image reference is a project-root concern (the root publish workflow), not a lane value,
+    // so any stack accepts `--image`.
+    if (key === "image") continue;
     if (!values[key]) {
       const declared = Object.keys(values);
       throw new ConfigError(
@@ -733,6 +927,41 @@ export function createProject({
     rewriteProjectManifest({ entries: manifest.entries, token, name, exclude: dockerfileFragment ? [dockerfileFragment] : [] }),
     "utf8",
   );
+
+  // The root image: recompose from every lane the project has (the ones already stamped plus this
+  // one), so creating a second lane completes the file instead of overwriting it. A scaffold with
+  // no build fragment contributes nothing; real scaffolds all declare one.
+  const templateDir = join(environmentsPath, PROJECT_TEMPLATE);
+  const lanes = laneSources(projectRoot);
+  lanes.set(laneDir, stack);
+  const sources = [];
+  for (const [sourceLane, source] of lanes) {
+    const sourceManifest =
+      source === stack ? manifest : loadManifest(join(environmentsPath, source, ".salgadinhos", "manifest.yml"));
+    const fragmentRel = sourceManifest.instantiate.dockerfile;
+    if (!fragmentRel) continue;
+    const fragmentPath = join(environmentsPath, source, fragmentRel);
+    if (!existsSync(fragmentPath)) {
+      throw new ConfigError(`scaffold '${source}' declares a Dockerfile fragment that does not exist: ${fragmentPath}`);
+    }
+    const fragment = readFileSync(fragmentPath, "utf8").replace(/\r\n/g, "\n");
+    const stage = fragmentStageName(fragment);
+    if (!stage) throw new ConfigError(`scaffold '${source}' Dockerfile fragment declares no 'AS <stage>'`);
+    sources.push({
+      source,
+      lane: sourceLane,
+      manifest: sourceManifest,
+      stage,
+      fragment: normalizeFragmentLane(fragment, sourceManifest.instantiate.lane, sourceLane),
+    });
+  }
+  if (sources.length > 0) {
+    const composed = composeRootDockerfile({ sources });
+    writeFileSync(join(projectRoot, "Dockerfile"), applyPlaceholders(composed.text, token, name), "utf8");
+    copyRuntimeDeploy({ templateDir, projectRoot, pair: composed.pair, frontend: composed.frontend });
+  }
+  const image = imageReference({ name, override: overrides.image });
+  copyReleaseTemplate({ templateDir, projectRoot, image });
 
   const sentinelPath = join(projectRoot, ".salgadinhos", `${sentinelFileName(laneDir)}.yml`);
   mkdirSync(dirname(sentinelPath), { recursive: true });
@@ -787,6 +1016,7 @@ export function createProject({
     scaffoldSha,
     appliedValues,
     ports: chosenPorts,
+    image,
     check,
     topics: manifest.topics,
     skippedCheck: skipCheck || !check,
@@ -884,6 +1114,7 @@ function main(argv) {
       `[new-project]   ports: api ${result.ports.api}, web ${result.ports.web}, mysql ${result.ports.mysql}, frontendDev ${result.ports.frontendDev} (.salgadinhos/ports.json)`,
     );
     console.log(`[new-project]   overrides: ${result.appliedValues.length > 0 ? result.appliedValues.join(", ") : "none"}`);
+    console.log(`[new-project]   image: ${result.image} (root docker-publish.yml)`);
     console.log(`[new-project]   stack topics: ${result.topics.length > 0 ? result.topics.join(", ") : "none declared"}`);
     console.log(`[new-project]   fast check: ${result.skippedCheck ? "skipped" : result.check}`);
     console.log(`[new-project]   worktree sweep: ${result.skippedVendor ? "skipped" : "vendored into the bootstrap commit"}`);

@@ -75,6 +75,23 @@ instantiate:
   # The backend build-stage fragment: creation keeps it out of the lane (the project's root image
   # composes it), so the lane never carries a competing build.
   dockerfile: Dockerfile
+  # How the built artifact runs in the project's one root image. Reusing the uv base keeps the
+  # resolved `.venv` compatible with the interpreter it was built against; a paired image
+  # (backend + react) reuses this base and installs `system_packages`.
+  runtime:
+    base: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    workdir: /app
+    copy:
+      - "/app/.venv /app/.venv"
+      - "/app/src /app/src"
+      - "/app/pyproject.toml /app/pyproject.toml"
+    command: .venv/bin/python -m template.application.boot
+    port: "8080"
+    # Pinned in the image so the app listens on 8080 regardless of the host-dev default a `--port`
+    # override writes into settings.py; nginx and the health probe target this port.
+    port_env: HTTP_PORT
+    system_packages:
+      - nginx
   check: uv run poe check
   values:
     db:
@@ -110,9 +127,3 @@ instantiate:
           - "MYSQL__PORT:-{{value}}}:3306"
         tests/unit/test_app_host.py:
           - "settings.mysql.port == {{value}}"
-    image:
-      # The override is the complete image reference (`luiznaac/<project>-python`).
-      style: whole
-      replacements:
-        .github/workflows/docker-publish.yml:
-          - luiznaac/template-python

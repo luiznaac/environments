@@ -9,6 +9,7 @@ import {
   statSync,
   symlinkSync,
   writeFileSync,
+  cpSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -21,8 +22,11 @@ import {
   applyValueOverrides,
   blockForBase,
   blocksInUse,
+  composeRootDockerfile,
   fillValue,
   findTokenLeftovers,
+  fragmentStageName,
+  imageReference,
   isDependencyLockfile,
   parseDockerPorts,
   parseNetstatListeners,
@@ -86,7 +90,7 @@ instantiate:
 test("loadManifest: instantiate defaults to nulls and empty lists when absent", () => {
   const path = manifest("entries:\n  biome.json: owned\ninstantiate:\n  name: template\n");
   const { instantiate } = loadManifest(path);
-  assert.deepEqual(instantiate, { name: "template", lane: null, check: null, dockerfile: null, keep: [], values: {} });
+  assert.deepEqual(instantiate, { name: "template", lane: null, check: null, dockerfile: null, runtime: null, keep: [], values: {} });
 });
 
 test("loadManifest: reads instantiate.dockerfile as the creation-only fragment path", () => {
@@ -99,6 +103,55 @@ instantiate:
   dockerfile: Dockerfile
 `);
   assert.equal(loadManifest(path).instantiate.dockerfile, "Dockerfile");
+});
+
+test("loadManifest: reads instantiate.runtime as the root-image runtime recipe", () => {
+  const path = manifest(`
+instantiate:
+  name: template
+  runtime:
+    base: eclipse-temurin:21-jre
+    workdir: /opt/app
+    copy:
+      - "/app/application/build/install/application/ /opt/app/"
+    command: /opt/app/bin/application
+    port: "8080"
+    port_env: KTOR_PORT
+    system_packages:
+      - nginx
+`);
+  assert.deepEqual(loadManifest(path).instantiate.runtime, {
+    base: "eclipse-temurin:21-jre",
+    workdir: "/opt/app",
+    copy: ["/app/application/build/install/application/ /opt/app/"],
+    command: "/opt/app/bin/application",
+    port: "8080",
+    portEnv: "KTOR_PORT",
+    systemPackages: ["nginx"],
+  });
+});
+
+test("loadManifest: instantiate.runtime is validated", () => {
+  const cases = [
+    ["runtime: [a]", /'instantiate\.runtime' must be a map/],
+    ["runtime:\n    copy:\n      - x", /'instantiate\.runtime' needs 'base'/],
+    ["runtime:\n    base: x\n    copy: []", /'instantiate\.runtime\.copy' must be a non-empty list of strings/],
+    ["runtime:\n    base: x\n    copy: [a]\n    system_packages: nginx", /'instantiate\.runtime\.system_packages' must be a list of strings/],
+  ];
+  for (const [body, pattern] of cases) {
+    const path = manifest(`instantiate:\n  name: template\n  ${body}\n`);
+    assert.throws(
+      () => loadManifest(path),
+      (error) => error instanceof ConfigError && pattern.test(error.message),
+      `expected ${JSON.stringify(body)} to fail with ${pattern}`,
+    );
+  }
+});
+
+test("fragmentStageName: reads the stage a build fragment declares", () => {
+  assert.equal(fragmentStageName("FROM eclipse-temurin:21-jdk AS backend\nWORKDIR /app\n"), "backend");
+  assert.equal(fragmentStageName("# comment\nFROM node:22-slim AS frontend\n"), "frontend");
+  assert.equal(fragmentStageName("WORKDIR /app\n"), null);
 });
 
 test("loadManifest: value defaults and styles are kept as declared", () => {
@@ -128,7 +181,7 @@ instantiate:
 test("loadManifest: php-style instantiate with only a null name still loads", () => {
   const path = manifest("entries: {}\ninstantiate:\n  name: null\n  lane: null\n");
   const { instantiate } = loadManifest(path);
-  assert.deepEqual(instantiate, { name: null, lane: null, check: null, dockerfile: null, keep: [], values: {} });
+  assert.deepEqual(instantiate, { name: null, lane: null, check: null, dockerfile: null, runtime: null, keep: [], values: {} });
 });
 
 test("loadManifest: malformed instantiate fields are config errors", () => {
@@ -586,9 +639,10 @@ test("cli: creates the lane, renaming paths, contents and JSON package names", (
 
 test("cli: a declared creation-only Dockerfile is not copied into the lane", () => {
   const fix = miniCodeRoot({
-    manifest: `entries:\n  Dockerfile: judgment\ninstantiate:\n  name: template\n  lane: backend\n  dockerfile: Dockerfile\n`,
+    manifest: `entries:\n  Dockerfile: judgment\ninstantiate:\n  name: template\n  lane: backend\n  dockerfile: Dockerfile\n  runtime:\n    base: scratch\n    workdir: /app\n    copy:\n      - "/app.txt /app.txt"\n    command: /app.txt\n`,
     files: {
-      "Dockerfile": "FROM scratch AS backend\n",
+      "Dockerfile": "FROM scratch AS backend\nCOPY backend/app.txt /app.txt\n",
+      "app.txt": "artifact\n",
       "src/template/app.py": "package template.app\n",
     },
   });
@@ -620,7 +674,7 @@ test("cli: the project manifest keeps the entries and drops instantiate", () => 
   const copied = loadManifest(join(fix.root, "widget", "backend", ".salgadinhos", "manifest.yml"));
   const original = loadManifest(join(fix.root, "environments", "mini", ".salgadinhos", "manifest.yml"));
   assert.deepEqual(copied.entries, original.entries);
-  assert.deepEqual(copied.instantiate, { name: null, lane: null, check: null, dockerfile: null, keep: [], values: {} });
+  assert.deepEqual(copied.instantiate, { name: null, lane: null, check: null, dockerfile: null, runtime: null, keep: [], values: {} });
   assert.doesNotMatch(readFileSync(join(fix.root, "widget", "backend", ".salgadinhos", "manifest.yml"), "utf8"), /\btemplate\b/);
 });
 
@@ -671,9 +725,9 @@ test("cli: a failing fast check aborts creation before the first commit", () => 
 
 test("cli: refuses an override the stack does not declare", () => {
   const fix = miniCodeRoot();
-  const result = runCli(fix.root, createArgs(fix, ["--image", "luiznaac/widget", "--skip-check", "--skip-guard", "--skip-vendor"]));
+  const result = runCli(fix.root, createArgs(fix, ["--base-path", "/widget/", "--skip-check", "--skip-guard", "--skip-vendor"]));
   assert.equal(result.status, 2);
-  assert.match(result.stderr, /no 'image' value to override/);
+  assert.match(result.stderr, /no 'basePath' value to override/);
 });
 
 test("cli: --lane overrides the manifest lane and names the sentinel after it", () => {
@@ -883,11 +937,182 @@ test("cli: vendors the worktree sweep before the first commit with no uncommitte
 });
 
 // ---------------------------------------------------------------------------
-// Committed manifests and the real scaffolds
+// Root image composition and the project-root release template
 // ---------------------------------------------------------------------------
+
+// A two-scaffold code root (a backend and a frontend) plus the real project-template, so
+// composition, the release files and a plain `docker build` exercise the same code paths a real
+// stack does — with `FROM scratch` stages, so the build needs no network.
+const MINI_BACK_MANIFEST = `
+entries:
+  Dockerfile: judgment
+instantiate:
+  name: template
+  lane: backend
+  dockerfile: Dockerfile
+  runtime:
+    base: scratch
+    workdir: /app
+    copy:
+      - "/app.txt /app.txt"
+    command: /app.txt
+    port: "8080"
+    system_packages: []
+`;
+
+const MINI_FRONT_MANIFEST = `
+entries:
+  Dockerfile: judgment
+instantiate:
+  name: template
+  lane: frontend
+  dockerfile: Dockerfile
+  runtime:
+    base: scratch
+    copy:
+      - "/index.html /index.html"
+    port: "80"
+`;
+
+function composeCodeRoot() {
+  const root = mkdtempSync(join(tmpdir(), "new-project-compose-"));
+  const write = (rel, content) => {
+    const path = join(root, rel);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content);
+  };
+  write("environments/miniback/.salgadinhos/manifest.yml", MINI_BACK_MANIFEST);
+  write("environments/miniback/Dockerfile", "FROM scratch AS backend\nCOPY backend/app.txt /app.txt\n");
+  write("environments/miniback/app.txt", "backend artifact\n");
+  write("environments/minifront/.salgadinhos/manifest.yml", MINI_FRONT_MANIFEST);
+  write("environments/minifront/Dockerfile", "FROM scratch AS frontend\nCOPY frontend/index.html /index.html\n");
+  write("environments/minifront/index.html", "<!doctype html><title>app</title>\n");
+  cpSync(join(REPO_ROOT, "project-template"), join(root, "environments", "project-template"), { recursive: true });
+  initGit(join(root, "environments"));
+  return root;
+}
+
+const composeArgs = (root, stack, extra = []) => [
+  "--code-root", root, "--stack", stack, "--name", "widget",
+  "--skip-check", "--skip-guard", "--skip-vendor", ...extra,
+];
+
+const projectDockerfile = (root) => readFileSync(join(root, "widget", "Dockerfile"), "utf8").replace(/\r\n/g, "\n");
+
+test("composeRootDockerfile: a backend-only project gets the backend stage and one runtime", () => {
+  const result = composeRootDockerfile({
+    sources: [{ source: "miniback", stage: "backend", fragment: "FROM scratch AS backend\n", manifest: { instantiate: { runtime: { base: "scratch", workdir: "/app", copy: ["/a /a"], command: "/a", port: "8080", portEnv: "APP_PORT", systemPackages: [] } } } }],
+  });
+  assert.equal(result.pair, false);
+  assert.match(result.text, /^FROM scratch AS backend$/m);
+  assert.match(result.text, /^FROM scratch AS runtime$/m);
+  assert.match(result.text, /COPY --from=backend \/a \/a/);
+  assert.match(result.text, /^ENV APP_PORT=8080$/m, "the app's listen port is pinned to the image port");
+  assert.doesNotMatch(result.text, /AS frontend/);
+});
+
+test("composeRootDockerfile: a frontend-only project gets the frontend stage and a static runtime", () => {
+  const result = composeRootDockerfile({
+    sources: [{ source: "minifront", stage: "frontend", fragment: "FROM scratch AS frontend\n", manifest: { instantiate: { runtime: { base: "scratch", workdir: null, copy: ["/i /i"], command: null, port: "80", systemPackages: [] } } } }],
+  });
+  assert.equal(result.pair, false);
+  assert.equal(result.frontend, true);
+  assert.match(result.text, /^FROM scratch AS frontend$/m);
+  assert.match(result.text, /COPY --from=frontend \/i \/i/);
+  assert.match(result.text, /COPY deploy\/spa\.conf \/etc\/nginx\/conf\.d\/default\.conf/, "a SPA-fallback site is installed");
+  assert.doesNotMatch(result.text, /^CMD /m, "a static runtime needs no command");
+});
+
+test("composeRootDockerfile: a pair installs the backend's packages and runs both", () => {
+  const result = composeRootDockerfile({
+    sources: [
+      { source: "miniback", stage: "backend", fragment: "FROM scratch AS backend\n", manifest: { instantiate: { runtime: { base: "scratch", workdir: "/app", copy: ["/a /a"], command: "/a", port: "8080", portEnv: "APP_PORT", systemPackages: ["nginx"] } } } },
+      { source: "minifront", stage: "frontend", fragment: "FROM scratch AS frontend\n", manifest: { instantiate: { runtime: { base: "scratch", workdir: null, copy: ["/i /i"], command: null, port: "80", systemPackages: [] } } } },
+    ],
+  });
+  assert.equal(result.pair, true);
+  assert.match(result.text, /apt-get install -y --no-install-recommends nginx/);
+  assert.match(result.text, /rm -rf \/var\/lib\/apt\/lists\/\* \/etc\/nginx\/sites-enabled\/default/, "the stock site is removed so ours owns port 80");
+  assert.match(result.text, /COPY --from=backend \/a \/a/);
+  assert.match(result.text, /COPY --from=frontend \/i \/i/);
+  assert.match(result.text, /COPY deploy\/nginx\.conf/);
+  assert.match(result.text, /^ENV APP_PORT=8080$/m);
+  assert.match(result.text, /ENV APP_CMD="\/a"/);
+  assert.match(result.text, /EXPOSE 80 8080/);
+});
+
+test("composeRootDockerfile: refuses two backends or an unknown stage", () => {
+  const backend = { source: "b", stage: "backend", fragment: "", manifest: { instantiate: { runtime: { base: "x", workdir: null, copy: ["/a /a"], command: "/a", port: null, systemPackages: [] } } } };
+  assert.throws(() => composeRootDockerfile({ sources: [backend, { ...backend, source: "b2" }] }), /only one backend/);
+  assert.throws(() => composeRootDockerfile({ sources: [{ ...backend, stage: "weird" }] }), /unknown stage/);
+});
+
+test("imageReference: defaults to luiznaac/<project> and honours --image", () => {
+  assert.equal(imageReference({ name: "widget" }), "luiznaac/widget");
+  assert.equal(imageReference({ name: "widget", override: "acme/api" }), "acme/api");
+});
+
+test("cli: a backend lane composes a root Dockerfile and the root release template", () => {
+  const root = composeCodeRoot();
+  const result = runCli(root, composeArgs(root, "miniback"));
+  assert.equal(result.status, 0, result.stderr);
+
+  const df = projectDockerfile(root);
+  assert.match(df, /^FROM scratch AS backend$/m);
+  assert.match(df, /^FROM scratch AS runtime$/m);
+  assert.match(df, /^CMD \["sh", "-c", "\/app\.txt"\]$/m);
+
+  assert.ok(existsSync(join(root, "widget", ".github", "workflows", "docker-publish.yml")), "the publish workflow lands at the root");
+  assert.ok(existsSync(join(root, "widget", ".github", "release.yml")), "the notes config lands at the root");
+  assert.ok(existsSync(join(root, "widget", "scripts", "release.sh")), "the release script lands at the root");
+  assert.match(readFileSync(join(root, "widget", "scripts", "release.sh"), "utf8"), /gh release create/);
+  const workflow = readFileSync(join(root, "widget", ".github", "workflows", "docker-publish.yml"), "utf8");
+  assert.match(workflow, /images: luiznaac\/widget/, "the image override is applied at the root");
+  assert.ok(!existsSync(join(root, "widget", "backend", ".github", "workflows", "docker-publish.yml")), "no lane-local publish workflow");
+});
+
+test("cli: --image rewrites the root publish workflow's image reference", () => {
+  const root = composeCodeRoot();
+  assert.equal(runCli(root, composeArgs(root, "miniback", ["--image", "acme/widget-api"])).status, 0);
+  const workflow = readFileSync(join(root, "widget", ".github", "workflows", "docker-publish.yml"), "utf8");
+  assert.match(workflow, /images: acme\/widget-api/);
+  assert.doesNotMatch(workflow, /luiznaac\/template/);
+});
+
+test("cli: creating the frontend lane after the backend completes (not overwrites) the root file", () => {
+  const root = composeCodeRoot();
+  assert.equal(runCli(root, composeArgs(root, "miniback")).status, 0);
+  assert.equal(runCli(root, composeArgs(root, "minifront", ["--force"])).status, 0);
+
+  const df = projectDockerfile(root);
+  assert.match(df, /^FROM scratch AS backend$/m, "the backend stage survives");
+  assert.match(df, /^FROM scratch AS frontend$/m, "the frontend stage is added");
+  assert.match(df, /^FROM scratch AS runtime$/m);
+  assert.match(df, /COPY --from=frontend \/index\.html \/index\.html/);
+  assert.ok(existsSync(join(root, "widget", "deploy", "nginx.conf")), "the paired runtime's nginx site is added");
+  assert.ok(existsSync(join(root, "widget", "deploy", "entrypoint.sh")), "the paired runtime's entrypoint is added");
+
+  const before = df;
+  assert.equal(runCli(root, composeArgs(root, "minifront", ["--force"])).status, 0);
+  assert.equal(projectDockerfile(root), before, "re-running the same lane is idempotent");
+});
+
+test("cli: the release template is not clobbered by a second lane", () => {
+  const root = composeCodeRoot();
+  assert.equal(runCli(root, composeArgs(root, "miniback")).status, 0);
+  const workflowPath = join(root, "widget", ".github", "workflows", "docker-publish.yml");
+  const edited = `${readFileSync(workflowPath, "utf8")}\n# project-local edit\n`;
+  writeFileSync(workflowPath, edited);
+  assert.equal(runCli(root, composeArgs(root, "minifront", ["--force"])).status, 0);
+  assert.equal(readFileSync(workflowPath, "utf8"), edited, "a project-owned release file is left alone");
+});
 
 // The real scaffolds are read through a junction so the code root is a scratch dir with no
 // siblings to collide with.
+// ---------------------------------------------------------------------------
+// Committed manifests and the real scaffolds
+// ---------------------------------------------------------------------------
+
 function realCodeRoot() {
   const root = mkdtempSync(join(tmpdir(), "new-project-real-"));
   symlinkSync(REPO_ROOT, join(root, "environments"), "junction");
@@ -904,27 +1129,34 @@ test("committed manifests: the live scaffolds declare the creation data", () => 
   assert.equal(kotlin.lane, "backend");
   assert.equal(kotlin.check, "./gradlew clean build");
   assert.equal(kotlin.dockerfile, "Dockerfile", "the creation-only fragment is declared");
+  assert.equal(kotlin.runtime.base, "eclipse-temurin:21-jre", "the backend runtime base is declared");
+  assert.equal(kotlin.runtime.command, "/opt/app/bin/application");
+  assert.equal(kotlin.runtime.portEnv, "KTOR_PORT", "the in-image listen port is pinned via the app's env var");
+  assert.deepEqual(kotlin.runtime.systemPackages, ["nginx"], "a paired image installs nginx");
   assert.deepEqual(kotlin.keep, [".salgadinhos/manifest.yml", "config/detekt/config.yml", "gradlew", "gradlew.bat"]);
-  assert.deepEqual(Object.keys(kotlin.values).sort(), ["db", "image", "mysqlPort", "port"]);
+  assert.deepEqual(Object.keys(kotlin.values).sort(), ["db", "mysqlPort", "port"]);
   assert.deepEqual(kotlin.values.db.replacements[".env.example"], ["MYSQL_DATABASE=template"]);
   assert.equal(kotlin.values.port.default, "8080");
   assert.equal(kotlin.values.mysqlPort.default, "3306");
-  assert.equal(kotlin.values.image.style, "whole", "the image override is the full image reference");
 
   const python = loadManifest(join(REPO_ROOT, "python", ".salgadinhos", "manifest.yml")).instantiate;
   assert.equal(python.lane, "backend");
   assert.equal(python.check, "uv run poe check");
   assert.equal(python.dockerfile, "Dockerfile", "the creation-only fragment is declared");
+  assert.equal(python.runtime.base, "ghcr.io/astral-sh/uv:python3.12-bookworm-slim");
+  assert.match(python.runtime.command, /template\.application\.boot$/, "the command carries the name token");
+  assert.equal(python.runtime.portEnv, "HTTP_PORT", "the in-image listen port is pinned via the app's env var");
   assert.deepEqual(python.keep, []);
-  assert.deepEqual(Object.keys(python.values).sort(), ["db", "image", "mysqlPort", "port"]);
+  assert.deepEqual(Object.keys(python.values).sort(), ["db", "mysqlPort", "port"]);
   assert.equal(python.values.port.default, "8080");
   assert.equal(python.values.mysqlPort.default, "3306");
-  assert.equal(python.values.image.style, "whole");
 
   const react = loadManifest(join(REPO_ROOT, "react", ".salgadinhos", "manifest.yml")).instantiate;
   assert.equal(react.lane, "frontend");
   assert.equal(react.check, "npm ci && npm run check");
   assert.equal(react.dockerfile, "Dockerfile", "the creation-only fragment is declared");
+  assert.equal(react.runtime.base, "nginx:1.27-alpine", "a frontend-only runtime is the static server");
+  assert.deepEqual(react.runtime.copy, ["/fe/dist /usr/share/nginx/html"]);
   assert.deepEqual(react.keep, []);
   assert.deepEqual(Object.keys(react.values), ["port", "frontendDevPort", "basePath"]);
   assert.equal(react.values.port.default, "8080");
@@ -1176,4 +1408,113 @@ test("real scaffold: react takes --port and --frontend-dev-port into the Vite co
   const vite = readFileSync(join(lane, "vite.config.ts"), "utf8");
   assert.match(vite, /FRONTEND_DEV_PORT \?\? 8113/);
   assert.match(vite, /VITE_API_TARGET \?\? "http:\/\/localhost:8110"/);
+});
+
+// ---------------------------------------------------------------------------
+// Real scaffolds: composition into the project-root image
+// ---------------------------------------------------------------------------
+
+test("compose (real): kotlin creates a backend-only root image with its runtime", () => {
+  const root = realCodeRoot();
+  assert.equal(runCli(root, ["--code-root", root, "--stack", "kotlin", "--name", "widget", "--skip-check", "--skip-guard", "--skip-vendor"]).status, 0);
+  const df = projectDockerfile(root);
+  assert.match(df, /^FROM eclipse-temurin:21-jdk AS backend$/m, "the kotlin build stage");
+  assert.match(df, /^FROM eclipse-temurin:21-jre AS runtime$/m, "the shared backend runtime base");
+  assert.match(df, /COPY --from=backend \/app\/application\/build\/install\/application\/ \/opt\/app\//);
+  assert.match(df, /^ENV KTOR_PORT=8080$/m, "the app is pinned to the image port");
+  assert.match(df, /^CMD \["sh", "-c", "\/opt\/app\/bin\/application"\]$/m);
+  assert.ok(!/AS frontend/.test(df), "no frontend stage without a frontend lane");
+  const lane = join(root, "widget", "backend");
+  assert.ok(!existsSync(join(lane, "Dockerfile")), "the fragment stays out of the lane");
+  assert.ok(!existsSync(join(lane, ".github", "workflows", "docker-publish.yml")), "no lane-local publish workflow");
+  assert.ok(!existsSync(join(REPO_ROOT, "kotlin", ".github", "workflows", "docker-publish.yml")), "the dead scaffold workflow is retired");
+});
+
+test("compose (real): python creates a backend-only root image with its uv runtime", () => {
+  const root = realCodeRoot();
+  assert.equal(runCli(root, ["--code-root", root, "--stack", "python", "--name", "widget", "--skip-check", "--skip-guard", "--skip-vendor"]).status, 0);
+  const df = projectDockerfile(root);
+  assert.match(df, /^FROM ghcr\.io\/astral-sh\/uv:python3\.12-bookworm-slim AS backend$/m, "the python build stage");
+  assert.match(df, /^FROM ghcr\.io\/astral-sh\/uv:python3\.12-bookworm-slim AS runtime$/m, "the uv runtime base");
+  assert.match(df, /COPY --from=backend \/app\/\.venv \/app\/\.venv/);
+  assert.match(df, /^ENV HTTP_PORT=8080$/m, "the app is pinned to the image port");
+  assert.match(df, /^CMD \["sh", "-c", "\.venv\/bin\/python -m widget\.application\.boot"\]$/m, "the boot target is renamed to the project");
+  assert.ok(existsSync(join(root, "widget", ".github", "workflows", "docker-publish.yml")));
+  assert.ok(existsSync(join(root, "widget", "scripts", "release.sh")));
+  assert.ok(!existsSync(join(REPO_ROOT, "python", ".github", "workflows", "docker-publish.yml")), "the dead scaffold workflow is retired");
+});
+
+test("compose (real): react creates a frontend-only root image served by nginx", () => {
+  const root = realCodeRoot();
+  assert.equal(runCli(root, ["--code-root", root, "--stack", "react", "--name", "widget", "--skip-check", "--skip-guard", "--skip-vendor"]).status, 0);
+  const df = projectDockerfile(root);
+  assert.match(df, /^FROM node:22-slim AS frontend$/m, "the react build stage");
+  assert.match(df, /^FROM nginx:1\.27-alpine AS runtime$/m, "the static runtime base");
+  assert.match(df, /COPY --from=frontend \/fe\/dist \/usr\/share\/nginx\/html/);
+  assert.match(df, /COPY deploy\/spa\.conf \/etc\/nginx\/conf\.d\/default\.conf/, "a SPA-fallback site is installed");
+  assert.ok(existsSync(join(root, "widget", "deploy", "spa.conf")), "the SPA site is copied into the project");
+  assert.ok(!/AS backend/.test(df), "no backend stage without a backend lane");
+  assert.ok(existsSync(join(root, "widget", ".github", "workflows", "docker-publish.yml")));
+  assert.ok(!existsSync(join(root, "widget", "frontend", ".github", "workflows", "docker-publish.yml")));
+});
+
+test("compose (real): creating the react lane after kotlin composes the paired image", () => {
+  const root = realCodeRoot();
+  assert.equal(runCli(root, ["--code-root", root, "--stack", "kotlin", "--name", "widget", "--skip-check", "--skip-guard", "--skip-vendor"]).status, 0);
+  assert.equal(runCli(root, ["--code-root", root, "--stack", "react", "--name", "widget", "--force", "--skip-check", "--skip-guard", "--skip-vendor"]).status, 0);
+
+  const df = projectDockerfile(root);
+  assert.match(df, /^FROM eclipse-temurin:21-jdk AS backend$/m);
+  assert.match(df, /^FROM node:22-slim AS frontend$/m);
+  assert.match(df, /^FROM eclipse-temurin:21-jre AS runtime$/m, "the pair runs on the backend base");
+  assert.match(df, /apt-get install -y --no-install-recommends nginx/);
+  assert.match(df, /rm -rf \/var\/lib\/apt\/lists\/\* \/etc\/nginx\/sites-enabled\/default/);
+  assert.match(df, /COPY --from=backend \/app\/application\/build\/install\/application\/ \/opt\/app\//);
+  assert.match(df, /COPY --from=frontend \/fe\/dist \/usr\/share\/nginx\/html/);
+  assert.match(df, /^ENV KTOR_PORT=8080$/m);
+  assert.match(df, /ENTRYPOINT \["sh", "\/usr\/local\/bin\/entrypoint\.sh"\]/);
+  assert.ok(existsSync(join(root, "widget", "deploy", "nginx.conf")));
+  assert.ok(existsSync(join(root, "widget", "deploy", "entrypoint.sh")));
+});
+
+test("compose (real): a --lane override normalizes the fragment's COPY paths, never its stage name", () => {
+  const root = realCodeRoot();
+  assert.equal(runCli(root, ["--code-root", root, "--stack", "kotlin", "--name", "widget", "--lane", "api", "--skip-check", "--skip-guard", "--skip-vendor"]).status, 0);
+  const df = projectDockerfile(root);
+  assert.match(df, /^COPY api\/ \.\/$/m, "the COPY operand follows the lane");
+  assert.doesNotMatch(df, /^COPY backend\/ /m, "the default lane prefix is gone from COPY lines");
+  assert.match(df, /^FROM eclipse-temurin:21-jdk AS backend$/m, "the stage name is untouched");
+});
+
+// A plain `docker build .` of each composed shape. The fixture's stages are `FROM scratch`, so
+// this proves the composition produces a valid, complete multi-stage file without pulling the
+// stacks' real base images; a generated project's own publish workflow builds the real image on
+// its first PR (`build-push-action` with `push: false`).
+const dockerReady = () => spawnSync("docker", ["info"], { stdio: "ignore" }).status === 0;
+const dockerTest = { skip: dockerReady() ? false : "docker is not available" };
+
+function dockerBuild(projectRoot) {
+  return spawnSync("docker", ["build", "--quiet", "."], { cwd: projectRoot, encoding: "utf8", timeout: 180000 });
+}
+
+test("compose (docker): a backend-only root Dockerfile builds with plain `docker build .`", dockerTest, () => {
+  const root = composeCodeRoot();
+  assert.equal(runCli(root, composeArgs(root, "miniback")).status, 0);
+  const result = dockerBuild(join(root, "widget"));
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("compose (docker): a frontend-only root Dockerfile builds with plain `docker build .`", dockerTest, () => {
+  const root = composeCodeRoot();
+  assert.equal(runCli(root, composeArgs(root, "minifront")).status, 0);
+  const result = dockerBuild(join(root, "widget"));
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("compose (docker): a paired root Dockerfile builds with plain `docker build .`", dockerTest, () => {
+  const root = composeCodeRoot();
+  assert.equal(runCli(root, composeArgs(root, "miniback")).status, 0);
+  assert.equal(runCli(root, composeArgs(root, "minifront", ["--force"])).status, 0);
+  const result = dockerBuild(join(root, "widget"));
+  assert.equal(result.status, 0, result.stderr);
 });

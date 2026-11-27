@@ -54,7 +54,7 @@ Module → key files → seam index, plus the app entry points; seeded from the 
 
 ### Repo root — build, config, deploy, CI
 **Purpose**: the cross-cutting build configuration, container story and the lanes' entry points.
-**Files**: `settings.gradle.kts`, `build.gradle.kts`, `gradle/libs.versions.toml`; `config/detekt/{config,format}.yml`; `Dockerfile`, `docker-compose.yml`, `.env.example`; `.pre-commit-config.yaml`; `.github/workflows/{ci,docker-publish}.yml`; `.run/BootKt.run.xml`
+**Files**: `settings.gradle.kts`, `build.gradle.kts`, `gradle/libs.versions.toml`; `config/detekt/{config,format}.yml`; `Dockerfile`, `docker-compose.yml`, `.env.example`; `.pre-commit-config.yaml`; `.github/workflows/ci.yml` (the publish workflow and root image live at the project root, composed by creation, not in the lane); `.run/BootKt.run.xml`
 **Seam(s)**: `settings.gradle.kts` is the module graph (`include`), `gradle/libs.versions.toml` the pinned version catalog, the detekt configs the lint baseline (`maxIssues: 0`, `allWarningsAsErrors`). `Dockerfile` is the creation-only backend build-stage fragment (`:application:installDist`) that a project's root image composes and creation keeps out of the lane. `.pre-commit-config.yaml` runs the branch guard and the Docker-free `unitTest` lane; `docker-compose.yml` is the MySQL dependency for local dev (the integration suite starts its own container).
 
 ## Entry points

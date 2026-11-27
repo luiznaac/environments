@@ -249,7 +249,7 @@ On Windows the socket mount is `//var/run/docker.sock:/var/run/docker.sock`. The
 
 Local dev: `docker compose up -d mysql` starts MySQL only, then run via the checked-in IntelliJ config in `.run/`, which supplies `MYSQL_HOST=localhost`, `MYSQL_USER=root`, `MYSQL_PASSWORD=`; the ports default in `application.yaml`.
 
-Docker: the scaffold's `Dockerfile` is the backend build-stage fragment (`./gradlew :application:installDist`). It is creation-only — declared as `instantiate.dockerfile` and kept out of the lane — and a project's root image composes it with the shared runtime. `docker-compose.yml` at the root adds MySQL for local runs.
+Docker: the scaffold's `Dockerfile` is the backend build-stage fragment (`./gradlew :application:installDist`). It is creation-only — declared as `instantiate.dockerfile` and kept out of the lane — and the project's root image composes it with the shared runtime. The runtime itself is `instantiate.runtime` data (`eclipse-temurin:21-jre`, the `installDist` artifact copied to `/opt/app`, `CMD /opt/app/bin/application`); a paired project (this backend + react) reuses that base and adds nginx, while a backend-only project runs the command directly. `docker-compose.yml` at the root adds MySQL for local runs.
 
 Git/PR conventions: see `salgadinhos/global/AGENTS.md`.
 
