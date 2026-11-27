@@ -8,6 +8,8 @@ Development guidelines for anyone (human, agent, or tool) working in this reposi
 
 There are four independent scaffolds, `kotlin/`, `python/`, `php/`, and `react/`. They do not share code or tooling with each other — treat them as separate repositories that happen to live in the same place. (The root-level `tools/` reads every scaffold's `.salgadinhos/manifest.yml`, but that's the propagation machinery aimed at the scaffolds, not shared scaffold code.) `kotlin/` and `python/` deliberately share the *same architecture* (see below), so a change to the shape of one should usually be mirrored in the other. `react/` is what every project's `frontend/` was generated from — see [react/AGENTS.md](react/AGENTS.md).
 
+`project-template/` is not a fifth scaffold: it carries no `.salgadinhos/manifest.yml` and is never discovered as a project lane. It is the canonical source of the **stack-agnostic project-root release flow** — the tag-driven `.github/workflows/docker-publish.yml`, `.github/release.yml`, and `scripts/release.sh` — copied to a new project's root and rewritten with the project's image reference when creation wiring lands (a follow-up to the template itself). Its `luiznaac/template` image token is that override's placeholder.
+
 ## Documentation
 
 - [Family repository documentation standard](https://github.com/luiznaac/salgadinhos/blob/master/docs/salgadinhos/documentation-standard.md) — the README content model, the mandatory doc set and the audit checklist.
