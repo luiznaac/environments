@@ -8,15 +8,11 @@ on:
 permissions:
   contents: read
 
-# The tools suite is platform-sensitive (path resolution, mode bits, symlinks), and a
-# Windows-shaped fixture once broke the POSIX run. Run the same suite on both so a
-# red tool test blocks the PR on either platform.
+# The family only targets Linux, so the tools suite runs on Linux alone (the Docker-compose
+# fixtures cannot build on a Windows runner, and no lane is exercised there).
 jobs:
   tools:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
