@@ -440,6 +440,41 @@ function parseInstantiateValues(raw, manifestPath) {
   return values;
 }
 
+// `instantiate.runtime` — how a stack's build artifact is run in the project's one root image.
+// A backend declares a base image, the COPY operands that pull its artifact out of the build
+// stage, the command that starts it, and (optionally) the system packages a paired image needs;
+// a frontend declares only its static base and the COPY that places its built files. The
+// composition in new-project.mjs reads this, so the runtime is data, never code per stack.
+function parseInstantiateRuntime(raw, manifestPath) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ConfigError(`${manifestPath}: 'instantiate.runtime' must be a map`);
+  }
+  const base = instantiateString(raw.base, manifestPath, "runtime.base");
+  if (!base) throw new ConfigError(`${manifestPath}: 'instantiate.runtime' needs 'base' (the runtime base image)`);
+  const workdir = instantiateString(raw.workdir, manifestPath, "runtime.workdir");
+  const command = instantiateString(raw.command, manifestPath, "runtime.command");
+  const port = raw.port === undefined || raw.port === null || raw.port === "" ? null : String(raw.port);
+  // The env var the app reads for its listen port. The composition pins it to `port` so the
+  // container listens where nginx proxies, independent of the host-dev default a `--port` override
+  // writes into the application config.
+  const portEnv = instantiateString(raw.port_env, manifestPath, "runtime.port_env");
+  if (raw.copy === undefined || raw.copy === null) {
+    throw new ConfigError(`${manifestPath}: 'instantiate.runtime' needs 'copy' (the COPY operands from the build stage)`);
+  }
+  if (!Array.isArray(raw.copy) || raw.copy.length === 0 || raw.copy.some((item) => typeof item !== "string" || item.trim() === "")) {
+    throw new ConfigError(`${manifestPath}: 'instantiate.runtime.copy' must be a non-empty list of strings`);
+  }
+  let systemPackages = [];
+  if (raw.system_packages !== undefined && raw.system_packages !== null) {
+    if (!Array.isArray(raw.system_packages) || raw.system_packages.some((item) => typeof item !== "string" || item === "")) {
+      throw new ConfigError(`${manifestPath}: 'instantiate.runtime.system_packages' must be a list of strings`);
+    }
+    systemPackages = raw.system_packages;
+  }
+  return { base, workdir, copy: [...raw.copy], command, port, portEnv, systemPackages };
+}
+
 function parseInstantiate(raw, manifestPath) {
   const source = raw ?? {};
   if (typeof source !== "object" || Array.isArray(source)) {
@@ -458,6 +493,7 @@ function parseInstantiate(raw, manifestPath) {
     lane: instantiateString(source.lane, manifestPath, "lane"),
     check: instantiateString(source.check, manifestPath, "check"),
     dockerfile: instantiateString(source.dockerfile, manifestPath, "dockerfile"),
+    runtime: parseInstantiateRuntime(source.runtime, manifestPath),
     keep,
     values: parseInstantiateValues(source.values, manifestPath),
   };

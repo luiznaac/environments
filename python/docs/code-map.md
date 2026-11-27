@@ -59,7 +59,7 @@ The layers are one package, `src/template/`, with one sub-package each; `import-
 
 ### Repo root — packaging, deploy, CI
 **Purpose**: the toolchain, configuration and container story around the package.
-**Files**: `pyproject.toml`; `Dockerfile`, `docker-compose.yml`, `.env.example`; `mysql/init.sql`; `.pre-commit-config.yaml`; `.github/workflows/{ci,docker-publish}.yml`
+**Files**: `pyproject.toml`; `Dockerfile`, `docker-compose.yml`, `.env.example`; `mysql/init.sql`; `.pre-commit-config.yaml`; `.github/workflows/ci.yml` (the publish workflow and root image live at the project root, composed by creation, not in the lane)
 **Seam(s)**: `pyproject.toml` carries every tool's config and the `poe` task graph — `poe check` (lint, format-check, typecheck, contracts, unit tests) is the verification ladder's fast rung, and its `import-linter` contracts are the layer gate. `docker-compose.yml` provides the MySQL dependency; `mysql/init.sql` is the schema bootstrap mounted by it. `Dockerfile` is the creation-only backend build-stage fragment (uv resolves the venv) that a project's root image composes and creation keeps out of the lane. `.pre-commit-config.yaml` runs the branch guard plus the unit lane.
 
 ## Entry points

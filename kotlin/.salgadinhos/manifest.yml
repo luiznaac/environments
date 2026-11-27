@@ -95,13 +95,29 @@ check:
 # `instantiate` is also the creation contract read by tools/new-project.mjs: the lane dir, the
 # fast check, the files where the token is legitimately part of the scaffold (not a placeholder),
 # and the convention values with their per-file literals for CLI overrides. The token pass
-# handles the rest: package names, `rootProject.name`, the DB name and the image.
+# handles the rest: package names, `rootProject.name` and the DB name. The project's image
+# reference is a root-template concern (`--image`), not a lane value.
 instantiate:
   name: template
   lane: backend
   # The backend build-stage fragment: creation keeps it out of the lane (the project's root image
   # composes it), so the lane never carries a competing build.
   dockerfile: Dockerfile
+  # How the built artifact runs in the project's one root image. The composition in
+  # tools/new-project.mjs copies `copy` out of the `backend` build stage into `base`, then runs
+  # `command`. A paired image (backend + react) reuses this base and installs `system_packages`.
+  runtime:
+    base: eclipse-temurin:21-jre
+    workdir: /opt/app
+    copy:
+      - "/app/application/build/install/application/ /opt/app/"
+    command: /opt/app/bin/application
+    port: "8080"
+    # Pinned in the image so the app listens on 8080 regardless of the host-dev default a `--port`
+    # override writes into application.yaml; nginx and the health probe target this port.
+    port_env: KTOR_PORT
+    system_packages:
+      - nginx
   # `clean build` includes the Docker-backed integration suite, like CI.
   check: ./gradlew clean build
   keep:
@@ -144,9 +160,3 @@ instantiate:
           - DEFAULT_MYSQL_PORT = {{value}}
         persistence/src/test/kotlin/dev/agner/template/persistence/configuration/MySqlEndpointTest.kt:
           - shouldBe {{value}}
-    image:
-      # The override is the complete image reference (`luiznaac/<project>`).
-      style: whole
-      replacements:
-        .github/workflows/docker-publish.yml:
-          - luiznaac/template
