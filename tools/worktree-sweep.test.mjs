@@ -3,9 +3,13 @@
 // carries. This file is vendored byte-for-byte beside the module into every
 // family repo, so it imports only Node builtins and the sweep module — never
 // another checkout's file. The CLI's wiring (porcelain read, origin/<default>
-// comparison, real commits, pushes, removals and branch deletions) and the
+// comparison, real commits, removals and branch deletion/retention) and the
 // inlined-helper cross-checks are canonical-only in
 // worktree-sweep.e2e.test.mjs.
+//
+// The sweep never touches origin: a removal preserves work by committing it
+// locally and by RETAINING an unlanded branch. Only a branch whose work already
+// landed (an ancestor of origin/<default>) is deleted.
 //
 // Vendored copy marker: salgadinhos worktree-sweep planner test.
 
@@ -83,9 +87,10 @@ test("planSweep removes a clean tree merged into the base, with nothing to prese
       label: "gone",
       action: "remove",
       reason: null,
-      preserve: { commit: false, push: false },
+      preserve: { commit: false },
       branch: "gone",
       deletable: true,
+      retain: false,
     },
   ]);
 });
@@ -126,48 +131,56 @@ test("planSweep keeps a fresh dirty tree fresh, not a removal candidate", () => 
   assert.deepEqual([item.action, item.reason], ["keep", "fresh"]);
 });
 
-test("planSweep turns a dirty old tree into a removal candidate carrying a WIP commit", () => {
+test("planSweep commits WIP and RETAINS the branch for a dirty tree, even when its HEAD landed", () => {
+  // The snapshot adds a commit, so the branch is unlanded by definition and must
+  // not be deleted.
   const [item] = planSweep([entry("/wts/dirty")], { ...base, isClean: () => false });
   assert.deepEqual(item, {
     path: "/wts/dirty",
     label: "dirty",
     action: "remove",
     reason: null,
-    preserve: { commit: true, push: false },
+    preserve: { commit: true },
     branch: "dirty",
-    deletable: true,
+    deletable: false,
+    retain: true,
   });
 });
 
-test("planSweep turns an unmerged old tree into a removal candidate carrying a push", () => {
+test("planSweep removes an unmerged old tree but RETAINS its branch (never deleted)", () => {
   const [item] = planSweep([entry("/wts/unmerged")], { ...base, isAncestor: () => false });
   assert.equal(item.action, "remove");
-  assert.deepEqual(item.preserve, { commit: false, push: true });
+  assert.deepEqual(item.preserve, { commit: false });
+  assert.equal(item.deletable, false);
+  assert.equal(item.retain, true);
 });
 
-test("planSweep carries both a WIP commit and a push for a dirty unmerged tree", () => {
+test("planSweep commits WIP and retains the branch for a dirty unmerged tree", () => {
   const [item] = planSweep([entry("/wts/both")], { ...base, isClean: () => false, isAncestor: () => false });
   assert.equal(item.action, "remove");
-  assert.deepEqual(item.preserve, { commit: true, push: true });
+  assert.deepEqual(item.preserve, { commit: true });
+  assert.equal(item.deletable, false);
+  assert.equal(item.retain, true);
 });
 
-test("planSweep keeps a dirty or unmerged detached tree — no branch to push", () => {
+test("planSweep keeps a dirty or unmerged detached tree — no branch to preserve the work on", () => {
   const dirty = planSweep([entry("/wts/wip", { branch: null, detached: true })], { ...base, isClean: () => false });
   assert.deepEqual(dirty.map((item) => [item.action, item.reason]), [["keep", "detached"]]);
   const unmerged = planSweep([entry("/wts/wip", { branch: null, detached: true })], { ...base, isAncestor: () => false });
   assert.deepEqual(unmerged.map((item) => [item.action, item.reason]), [["keep", "detached"]]);
 });
 
-test("planSweep removes a clean merged detached tree, with no branch to delete", () => {
+test("planSweep removes a clean landed detached tree, with no branch to delete", () => {
   const [item] = planSweep([entry("/wts/detached", { branch: null, detached: true })], base);
-  assert.deepEqual([item.action, item.branch, item.deletable], ["remove", null, false]);
+  assert.deepEqual([item.action, item.branch, item.deletable, item.retain], ["remove", null, false, false]);
 });
 
-test("planSweep never marks a prototype branch deletable", () => {
+test("planSweep never marks a prototype branch deletable or retained", () => {
   const [item] = planSweep([entry("/wts/prototype", { branch: "refs/heads/prototype/config-shape" })], base);
   assert.equal(item.action, "remove");
   assert.equal(item.branch, "prototype/config-shape");
   assert.equal(item.deletable, false);
+  assert.equal(item.retain, false);
 });
 
 test("planSweep keeps any tree on master/main with reason on-default (tripwire)", () => {
