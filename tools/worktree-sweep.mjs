@@ -16,22 +16,23 @@
 // once its PR merges. In practice they pile up, and `git worktree list` — the
 // natural way a later session finds naming precedents — grows into a token sink.
 // This sweep reclaims every old session tree, merged, unmerged or dirty, without
-// ever losing work:
+// ever losing work and without ever contacting origin:
 //
 //   - a dirty tree gets a `git add -A` + `git commit --no-verify` WIP snapshot
 //     on its branch;
-//   - a branch whose HEAD is not an ancestor of origin/<default> (as of the
-//     last fetch) is pushed to origin before anything is removed;
-//   - only then is the tree removed and its local branch deleted — never a
+//   - a branch whose work has NOT landed (its HEAD is not an ancestor of
+//     origin/<default>, as of the last fetch) is KEPT locally — never pushed.
+//     The sweep never runs `git push`; origin stays clean;
+//   - only a landed branch is deleted; the tree is removed either way — never a
 //     `prototype/*` or `master`/`main` branch;
-//   - a failed snapshot or push keeps the tree and the branch, reported.
+//   - a failed snapshot keeps the tree and the branch, reported.
 //
 // It also prunes local session branches (`<repo>-<slug>-<7hex>`, the guard's
 // naming) that are fully merged and have no worktree, so the local refs of
 // reclaimed sessions do not pile up; non-session branches are never touched.
 // The keep rules: the sweep's own directory, trees outside ../.worktrees/,
 // locked, unreadable and fresh (< --older-than hours) ones stay, and so does a
-// detached tree whose work the sweep could not push.
+// detached tree whose work cannot be preserved on a branch (dirty or unlanded).
 //
 // Dry run by default; --apply acts, then `git worktree prune` clears metadata
 // for trees whose directories are already gone.
@@ -112,17 +113,25 @@ export function planSweep(entries, { cwd, root, base, isClean, isAncestor, isOld
     if (!isOld(entry.path)) return keep("fresh");
 
     const commit = !clean;
-    const push = !entry.sha || !isAncestor(entry.sha, base);
-    if (!branch && (commit || push)) return keep("detached");
+    // "Landed" is the conservative ancestor test: the branch's HEAD is already
+    // in origin/<default>. A snapshot makes the branch unlanded by definition,
+    // so a dirty tree's branch is retained even when its pre-snapshot HEAD was
+    // merged. An unlanded branch is never deleted — it keeps the snapshot (or
+    // the last unpushed commit) after the tree goes.
+    const landed = entry.sha ? isAncestor(entry.sha, base) : false;
+    if (!branch && (commit || !landed)) return keep("detached");
 
+    const protectedBranch = branch !== null && isProtectedBranch(branch);
+    const deletable = branch !== null && !protectedBranch && landed && !commit;
     return {
       path: entry.path,
       label,
       action: "remove",
       reason: null,
-      preserve: { commit, push },
+      preserve: { commit },
       branch,
-      deletable: branch !== null && !isProtectedBranch(branch),
+      deletable,
+      retain: branch !== null && !protectedBranch && !deletable,
     };
   });
 }
@@ -267,11 +276,6 @@ function main() {
     }
   }
 
-  function headOf(path) {
-    const head = run(["rev-parse", "HEAD"], { cwd: path });
-    return head.ok ? head.out : null;
-  }
-
   // The preserve step: never remove a dirty tree before its WIP is a commit.
   // --no-verify keeps git hooks (codegen, guards) out of the sweep's path.
   function snapshot(path, label) {
@@ -299,7 +303,7 @@ function main() {
 
   let removed = 0;
   let preserved = 0;
-  let pushed = 0;
+  let retained = 0;
   let pruned = 0;
   let failed = 0;
   const kept = new Map();
@@ -331,15 +335,12 @@ function main() {
         preserved++;
         console.log(c.green("  would commit WIP"));
       }
-      // A snapshot makes the branch unmerged by definition, so a dirty tree is
-      // pushed even when its pre-snapshot HEAD was merged.
-      if (item.branch && (item.preserve.push || item.preserve.commit)) {
-        pushed++;
-        console.log(c.green(`  would push ${item.branch}`));
-      }
       if (item.deletable) {
         pruned++;
         console.log(c.green(`  would delete branch ${item.branch}`));
+      } else if (item.retain) {
+        retained++;
+        console.log(c.green(`  would retain branch ${item.branch} (unlanded)`));
       }
       removed++;
       removedPaths.add(item.path);
@@ -360,19 +361,6 @@ function main() {
         notes.push({ text: `snapshot failed: ${snap.error}`, ok: false });
       }
     }
-    if (!failure && item.branch) {
-      const head = headOf(item.path);
-      if (!head || !isAncestor(head, base)) {
-        const push = run(["push", "-u", "origin", item.branch], { cwd: item.path });
-        if (push.ok) {
-          pushed++;
-          notes.push({ text: `pushed ${item.branch}`, ok: true });
-        } else {
-          failure = "push failed";
-          notes.push({ text: `push failed: ${push.error}`, ok: false });
-        }
-      }
-    }
     if (!failure) {
       const removal = run(["worktree", "remove", item.path]);
       if (!removal.ok) {
@@ -391,8 +379,9 @@ function main() {
     removed++;
     removedPaths.add(item.path);
     console.log(c.green(`removed  ${short}  (${item.label})`));
-    // Recoverable by now: merged at the last fetch or just pushed. A protected
-    // branch (prototype, master/main) is never a deletion target.
+    // A landed branch is recoverable by now; a protected branch (prototype,
+    // master/main) is never a deletion target, and an unlanded branch is
+    // retained locally so nothing is lost.
     if (item.deletable) {
       const del = deleteBranch(item.branch);
       if (del.ok) {
@@ -402,6 +391,9 @@ function main() {
         failed++;
         notes.push({ text: `branch delete failed for ${item.branch}: ${del.error}`, ok: false });
       }
+    } else if (item.retain) {
+      retained++;
+      notes.push({ text: `retained branch ${item.branch} (unlanded)`, ok: true });
     }
     for (const note of notes) console.log(noteLine(note));
   }
@@ -451,7 +443,7 @@ function main() {
   const detail = [...kept.entries()].map(([reason, count]) => `${reason} ${count}`).join(", ");
   const summaryColor = failed > 0 ? c.red : c.green;
   console.log(summaryColor(`${apply ? "removed" : "would remove"} ${removed}, kept ${keptTotal}${detail ? ` (${detail})` : ""}`));
-  console.log(summaryColor(`summary: preserved ${preserved}, pushed ${pushed}, pruned ${pruned} branches, removed ${removed} trees`));
+  console.log(summaryColor(`summary: preserved ${preserved}, retained ${retained} branches, pruned ${pruned} branches, removed ${removed} trees`));
 }
 
 if (isMainModule(import.meta.url, process.argv[1])) main();
